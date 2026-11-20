@@ -100,7 +100,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
 
     func enable() {
         guard !demo, !busy else { return }
-        guard engineAvailable, signed, installed, let executable = Bundle.main.executableURL,
+        guard engineAvailable, signed, installed,
               let node = subscription?.selected else { issue = VPNError.signingRequired.localizedDescription; return }
         busy = true
         issue = nil
@@ -108,8 +108,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             defer { busy = false }
             do {
                 let manager = try await loadManager() ?? NETunnelProviderManager()
-                let provider = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions/\(VPNInstallation.providerID).systemextension/Contents/MacOS/VibeTunnel")
-                let reference = try VPNKeychain.saveSelected(node, trustedExecutables: [executable, provider])
+                let reference = try await VPNCredentialClient.store(node)
                 let configuration = NETunnelProviderProtocol()
                 configuration.providerBundleIdentifier = VPNInstallation.providerID
                 configuration.serverAddress = node.host
@@ -137,7 +136,10 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 try manager.connection.startVPNTunnel()
             } catch {
                 state = requested ? .unverified : .off
-                issue = "VPN could not be started. Protection is not confirmed; the saved protection request has not been disabled."
+                let detail = (error as? VPNCredentialFailure)?.localizedDescription
+                    ?? "VPN configuration or connection failed (code \((error as NSError).code))."
+                issue = detail + (requested ? " Protection is not confirmed; the protection request remains enabled."
+                                          : " No VPN configuration was enabled.")
             }
         }
     }
@@ -287,7 +289,12 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     }
 
     nonisolated func request(_ request: OSSystemExtensionRequest, foundProperties properties: [OSSystemExtensionProperties]) {
-        let enabled = properties.contains { $0.bundleIdentifier == VPNInstallation.providerID && $0.isEnabled }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        let enabled = properties.contains {
+            $0.bundleIdentifier == VPNInstallation.providerID && $0.isEnabled
+                && $0.bundleShortVersion == version && $0.bundleVersion == build
+        }
         Task { @MainActor in installed = enabled }
     }
 }

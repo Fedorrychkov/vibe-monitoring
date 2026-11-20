@@ -1,5 +1,7 @@
 import Foundation
 import XCTest
+import Security
+import Darwin
 @testable import VibeMonitoringCore
 
 final class VPNTests: XCTestCase {
@@ -65,13 +67,36 @@ final class VPNTests: XCTestCase {
         XCTAssertThrowsError(try VPNTunnelConfiguration.build(node: node, descriptor: 9, addresses: ["not-an-address"]))
     }
 
-    func testSelectedKeychainStorageRequiresBothTrustedExecutablesBeforeWriting() throws {
+    func testMenuProcessCannotWriteSystemCredentialsOrProbeStorage() throws {
+        guard geteuid() != 0 else { throw XCTSkip("This check must run as an ordinary user") }
         let node = try VPNNode(outbound: outbound(), index: 0)
-        for urls: [URL] in [[], [URL(fileURLWithPath: "/not-used")]] {
-            XCTAssertThrowsError(try VPNKeychain.saveSelected(node, trustedExecutables: urls)) { error in
-                XCTAssertEqual(error as? VPNError, .invalidConfiguration)
-            }
+        XCTAssertThrowsError(try VPNKeychain.saveSelected(node)) { error in
+            XCTAssertEqual(error as? VPNCredentialFailure, VPNCredentialFailure(.privileges, errSecAuthFailed))
         }
+        XCTAssertThrowsError(try VPNKeychain.probeSelectedStorage()) { error in
+            XCTAssertEqual(error as? VPNCredentialFailure, VPNCredentialFailure(.privileges, errSecAuthFailed))
+        }
+    }
+
+    func testProvisioningPayloadIsBoundedAndRevalidated() throws {
+        let node = try VPNNode(outbound: outbound(), index: 0)
+        let data = try JSONEncoder().encode(node)
+        XCTAssertEqual(try VPNNode.decodeValidated(data), node)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json["host"] = "changed.example"
+        XCTAssertThrowsError(try VPNNode.decodeValidated(JSONSerialization.data(withJSONObject: json)))
+        XCTAssertThrowsError(try VPNNode.decodeValidated(Data(repeating: 65, count: 256 * 1024 + 1)))
+    }
+
+    func testXPCRequirementsBindBothPeersToTheirTeamAndExactBundleID() throws {
+        for peer in [VPNCredentialIdentity.Peer.app, .provider] {
+            let text = try VPNCredentialIdentity.requirement(for: peer, team: "ABCDE12345")
+            XCTAssertTrue(text.contains("identifier \"\(peer.rawValue)\""))
+            XCTAssertTrue(text.contains("certificate leaf[subject.OU] = \"ABCDE12345\""))
+            var requirement: SecRequirement?
+            XCTAssertEqual(SecRequirementCreateWithString(text as CFString, [], &requirement), errSecSuccess)
+        }
+        XCTAssertThrowsError(try VPNCredentialIdentity.requirement(for: .app, team: "ABCDE12345\" or true"))
     }
 
     func testUnverifiedOrStaleProviderStateNeverTurnsTheShieldGreen() {

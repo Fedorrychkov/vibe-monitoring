@@ -82,6 +82,13 @@ public struct VPNNode: Codable, Sendable, Identifiable, Equatable {
         guard validated.id == id, validated.host == host, validated.port == port, validated.kind == kind else { throw VPNError.invalidConfiguration }
         return outbound
     }
+
+    public static func decodeValidated(_ data: Data) throws -> VPNNode {
+        guard data.count <= 256 * 1024 else { throw VPNError.invalidConfiguration }
+        let node = try JSONDecoder().decode(VPNNode.self, from: data)
+        _ = try node.validatedOutbound()
+        return node
+    }
 }
 
 public struct VPNSubscription: Codable, Sendable {

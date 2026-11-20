@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VibeMonitoringCore
 
 @main
 struct VibeMonitoringApp: App {
@@ -7,6 +8,19 @@ struct VibeMonitoringApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--check-vpn-storage") {
+            Task {
+                do {
+                    try await VPNCredentialClient.probeStorage()
+                    print("VPN credential storage check passed. No tunnel was started or VPN preferences changed.")
+                    exit(0)
+                } catch {
+                    fputs("\(error.localizedDescription)\n", stderr)
+                    exit(1)
+                }
+            }
+            dispatchMain()
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--render-demo"),
            CommandLine.arguments.indices.contains(index + 1) {
             do {

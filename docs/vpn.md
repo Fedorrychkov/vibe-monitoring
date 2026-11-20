@@ -1,6 +1,6 @@
 # Experimental built-in VPN
 
-**Status: code and build candidate only. The system extension has not been installed, connected or leak-tested on a real device.** A successful compile, ad-hoc signature or green unit test is not a protection guarantee.
+**Status: system-extension activation, subscription import and the credential-storage probe have been checked on one Mac. Connection and crash/leak checks remain outstanding.** A successful compile, signature or green unit test is not a protection guarantee.
 
 The candidate uses pinned XTLS/libXray v26.11.9 inside a macOS packet-tunnel system extension. The menu process is separate: quitting it does not deliberately stop an enabled VPN. No Happ process, private profile or subscription database is read.
 
@@ -9,7 +9,7 @@ The candidate uses pinned XTLS/libXray v26.11.9 inside a macOS packet-tunnel sys
 - HTTPS subscription import, plain/Base64 share-link lists, up to 4 MiB and 200 nodes. Cookies and redirects are not used. Failed imports keep the last saved subscription.
 - VLESS TLS/Reality, VMessAEAD and Trojan with compatible TCP/RAW, WebSocket, gRPC or HTTPUpgrade settings. Four fictional native-core fixtures cover VLESS/TLS, Reality/TCP, VMessAEAD/WS and Trojan/TLS.
 - Legacy VMess QR JSON, arbitrary Xray JSON, Clash/YAML, XHTTP, FinalMask and advanced chained configurations are **not supported by this first candidate**. Unsupported nodes are omitted; an empty result fails. TLS verification cannot be disabled. Confirm your provider's exported format before depending on import.
-- Subscription URL and nodes live in the app's private user Keychain item. The selected node is copied to the file-based System Keychain with an access list for the signed app/provider; saving may require macOS authorization. The OS VPN profile holds only its reference and node hash. A system extension cannot read the user's Data Protection Keychain. [Apple keychain contexts](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains).
+- Subscription URL and nodes live in the app's private user Keychain item. Authenticated XPC passes the selected node to the system extension before a VPN configuration is enabled. Both peers require the exact bundle ID and signing team. The extension, rather than the unprivileged menu app, writes to the file-based System Keychain with an access list for its own signed code. The OS VPN profile holds only the reference and node hash. A system extension cannot read the user's Data Protection Keychain. [Apple keychain contexts](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains).
 - Full IPv4/IPv6 routes, tunnel DNS, `includeAllNetworks`, enforced routes and a match-all On Demand rule. Additional optional exclusions are disabled. The core gets only the selected proxy outbound, without a `freedom`/direct fallback.
 - Provider health through `NETunnelProviderSession`, checked against the selected node and saved policy. Missing, contradictory or stale evidence never turns the shield green.
 - A stopped core triggers reassertion and retry with backoff. Wake/default-path changes request a core restart. Failures do not turn off the saved protection request or delete the VPN policy.
@@ -54,6 +54,18 @@ python3 scripts/sign-vpn.py \
 
 This only signs the candidate. Complete notarization and the third-party dependency-notice review before distributing a VPN binary. Move the properly signed app to `/Applications`, then use its explicit **Install network component** action and approve macOS's request. No scripts here install profiles, register Apple IDs, create certificates, disable system protections or connect automatically.
 
+An older installed provider is not treated as ready for a newer app; install the matching component before enabling protection. To check the credential path without creating a VPN configuration or starting a tunnel:
+
+```sh
+/Applications/VibeMonitoring.app/Contents/MacOS/VibeMonitoring --check-vpn-storage
+```
+
+The check uses the same authenticated XPC and storage code to write, read and delete a separate non-secret probe item. It does not read or change the selected server, subscription or any VPN's network configuration. Only the correctly signed app can call this service; a regular unsigned CLI process cannot write System Keychain data through it.
+
+The listener starts after `NEProvider.startSystemExtensionMode()`, using the Network Extension's App Group-prefixed Mach service, as in [Apple's Network Extension sample](https://developer.apple.com/documentation/networkextension/filtering-network-traffic). Both listener and client additionally apply explicit peer code-signing requirements.
+
+On-device check, 2026-11-20, version 0.3.2 (7): the signed app's probe passed; a separate unsigned client was rejected with XPC error 4097. The probe item was absent afterward, and no VibeMonitoring VPN configuration was created. These results cover credential preparation, not tunnel connectivity or leak protection.
+
 ## GitHub release packaging
 
 Distribution is through GitHub Releases, with public source in the same repository. No App Store submission is planned. Developer ID signing and Apple notarization also apply to this distribution route.
@@ -81,4 +93,4 @@ Use a controlled HTTPS echo endpoint and packet capture to record pass/fail. Do 
 6. Deny extension approval, lock Keychain, revoke/mismatch profiles and modify the saved policy. Confirm a clear unverified/off state and no fabricated green status.
 7. Repeat with real supported provider exports and server changes. Confirm credentials/subscription URLs never appear in logs, screenshots, notifications or crash reports.
 
-These checks remain outstanding. No live network settings have been changed during development.
+These leak checks remain outstanding. Builds and the storage probe do not change VPN connection settings.

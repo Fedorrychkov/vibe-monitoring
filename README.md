@@ -92,7 +92,7 @@ Dollar costs are intentionally not inferred from a model name or subscription pl
 - `auth.json`, API keys and subscription links are not read.
 - Conversation text, command arguments and tool outputs are not displayed, persisted or uploaded. The JSONL files themselves contain these fields; the parser extracts only the metadata it needs.
 - Preferences store the selected Codex directory, notification toggle and non-secret Quickping server origin in macOS UserDefaults.
-- The VPN candidate stores the subscription in the user's Keychain and the selected server in the file-based System Keychain, with an access list for the signed app and provider. Saving that item may request macOS authorization. VPN preferences contain a persistent Keychain reference and a non-secret node ID; no subscription URLs or UUIDs are written there.
+- The VPN candidate stores the subscription in the user's Keychain. Before enabling a VPN configuration, the app sends the selected server to its system extension over XPC with signing requirements on both peers. The system extension writes the credentials to the file-based System Keychain, accessible to its own signed code. VPN preferences contain a persistent Keychain reference and a non-secret node ID; no subscription URLs or UUIDs are written there.
 - Project folder names appear locally in the UI and, if enabled, finish notifications. Use `--demo` for public screenshots.
 
 ## Next modules

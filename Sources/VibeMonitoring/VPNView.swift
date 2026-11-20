@@ -117,7 +117,10 @@ struct VPNPreferencesView: View {
                 }
                 if store.busy { ProgressView().controlSize(.small) }
             }
-            if let issue = store.issue { Text(issue).font(.caption).foregroundStyle(.orange) }
+            if let issue = store.issue {
+                Text(issue).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
             Text(store.engineAvailable
                  ? "Subscriptions and server credentials stay in Keychain. Disable protection explicitly before changing the server. Installing the network component requires a provisioned, signed VPN build."
                  : "This monitoring-only build does not contain the VPN engine. The VPN build is separate and requires macOS network-extension approval.")
