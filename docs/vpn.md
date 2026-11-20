@@ -64,6 +64,8 @@ The check uses the same authenticated XPC and storage code to create, update, re
 
 The listener starts after `NEProvider.startSystemExtensionMode()`, using the Network Extension's App Group-prefixed Mach service, as in [Apple's Network Extension sample](https://developer.apple.com/documentation/networkextension/filtering-network-traffic). Both listener and client additionally apply explicit peer code-signing requirements.
 
+The Mach service name ends in the numeric build number. This avoids a stale service registration after system-extension replacement, tracked by Apple as FB17032197; see [Apple's upgrade discussion](https://developer.apple.com/forums/thread/779395). Signing validates matching app/provider build numbers and writes the resolved service name into the provider plist.
+
 On-device check, 2026-11-20, version 0.3.2 (7): the signed app's create/read/delete probe passed; a separate unsigned client was rejected with XPC error 4097. The probe item was absent afterward. A subsequent user connection attempt created the VPN configuration but did not establish a working tunnel; a repeated enable failed with credential write error -25308. Version 0.3.3 adds the missing update check and preserves existing ACLs. Tunnel startup failures record only a fixed stage and numeric code, not server details or credentials. Connectivity and leak protection remain unverified.
 
 ## GitHub release packaging

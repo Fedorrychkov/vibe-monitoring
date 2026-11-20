@@ -57,6 +57,8 @@ def validate_bundle_metadata(app, extension):
         versions.append((info.get('CFBundleShortVersionString'), info.get('CFBundleVersion')))
     if versions[0] != versions[1] or not all(versions[0]):
         raise RuntimeError('App and system extension versions must match')
+    if not isinstance(versions[0][1], str) or not re.fullmatch(r'[0-9]{1,10}', versions[0][1]):
+        raise RuntimeError('Use a numeric build number for the versioned Mach service')
 
 
 def main():
@@ -90,7 +92,7 @@ def main():
     validate_bundle_metadata(app, extension)
     ext_info = extension / 'Contents/Info.plist'
     info = plistlib.loads(ext_info.read_bytes())
-    info['NetworkExtension']['NEMachServiceName'] = app_team + '.dev.vibemonitoring.app.tunnel'
+    info['NetworkExtension']['NEMachServiceName'] = app_team + '.dev.vibemonitoring.app.tunnel.' + info['CFBundleVersion']
     ext_info.write_bytes(plistlib.dumps(info))
     with tempfile.TemporaryDirectory(prefix='vibe-signing-') as folder:
         for bundle, profile, entitlements, name in [

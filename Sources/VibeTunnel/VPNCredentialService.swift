@@ -9,7 +9,8 @@ final class VPNCredentialService: NSObject, NSXPCListenerDelegate, VPNCredential
 
     func start() throws {
         let team = try VPNCredentialIdentity.ownTeam()
-        let service = NSXPCListener(machServiceName: team + ".dev.vibemonitoring.app.tunnel")
+        let name = try VPNCredentialIdentity.serviceName(team: team, build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+        let service = NSXPCListener(machServiceName: name)
         service.setConnectionCodeSigningRequirement(try VPNCredentialIdentity.requirement(for: .app, team: team))
         service.delegate = self
         service.resume()

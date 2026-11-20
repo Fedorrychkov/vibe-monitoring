@@ -24,6 +24,15 @@ public enum VPNCredentialIdentity {
         return "anchor apple generic and identifier \"\(peer.rawValue)\" and certificate leaf[subject.OU] = \"\(team)\""
     }
 
+    public static func serviceName(team: String, build: String?) throws -> String {
+        _ = try requirement(for: .provider, team: team)
+        guard let build, build.range(of: "^[0-9]{1,10}$", options: .regularExpression) != nil else {
+            throw VPNCredentialFailure(.validation, errSecParam)
+        }
+        // A stable name can remain bound to a removed extension after upgrades (Apple FB17032197).
+        return team + ".dev.vibemonitoring.app.tunnel." + build
+    }
+
     public static func ownTeam() throws -> String {
         var code: SecCode?
         var staticCode: SecStaticCode?
@@ -63,7 +72,8 @@ private final class VPNCredentialExchange: @unchecked Sendable {
 
     init() throws {
         let team = try VPNCredentialIdentity.ownTeam()
-        connection = NSXPCConnection(machServiceName: team + ".dev.vibemonitoring.app.tunnel", options: [])
+        let name = try VPNCredentialIdentity.serviceName(team: team, build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+        connection = NSXPCConnection(machServiceName: name, options: [])
         connection.setCodeSigningRequirement(try VPNCredentialIdentity.requirement(for: .provider, team: team))
         connection.remoteObjectInterface = NSXPCInterface(with: VPNCredentialProtocol.self)
     }

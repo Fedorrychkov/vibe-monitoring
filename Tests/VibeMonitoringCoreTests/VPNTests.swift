@@ -99,6 +99,16 @@ final class VPNTests: XCTestCase {
         XCTAssertThrowsError(try VPNCredentialIdentity.requirement(for: .app, team: "ABCDE12345\" or true"))
     }
 
+    func testCredentialServiceNamesChangeAcrossBuildsAndRejectMissingMetadata() throws {
+        let old = try VPNCredentialIdentity.serviceName(team: "ABCDE12345", build: "8")
+        let updated = try VPNCredentialIdentity.serviceName(team: "ABCDE12345", build: "9")
+        XCTAssertEqual(updated, "ABCDE12345.dev.vibemonitoring.app.tunnel.9")
+        XCTAssertNotEqual(old, updated)
+        for build in [nil, "", "9/other", "9.other", "99999999999"] as [String?] {
+            XCTAssertThrowsError(try VPNCredentialIdentity.serviceName(team: "ABCDE12345", build: build))
+        }
+    }
+
     func testUnverifiedOrStaleProviderStateNeverTurnsTheShieldGreen() {
         let health = VPNProviderHealth(nodeID: "demo", running: true, reasserting: false, issue: nil)
         XCTAssertEqual(VPNProtectionState.evaluate(requested: true, policyValid: true, system: "connected", health: health, healthAge: 1, expectedNodeID: "demo"), .connected)

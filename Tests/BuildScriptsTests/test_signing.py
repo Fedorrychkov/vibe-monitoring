@@ -22,6 +22,18 @@ class SigningTests(unittest.TestCase):
                         'CFBundleVersion': '6', 'NSSystemExtensionUsageDescription': 'VPN protection'}
                 (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
             signing.validate_bundle_metadata(app, extension)
+            for bundle in [app, extension]:
+                path = bundle / 'Contents/Info.plist'
+                info = plistlib.loads(path.read_bytes())
+                info['CFBundleVersion'] = 'invalid/service'
+                path.write_bytes(plistlib.dumps(info))
+            with self.assertRaisesRegex(RuntimeError, 'numeric build number'):
+                signing.validate_bundle_metadata(app, extension)
+            for bundle in [app, extension]:
+                path = bundle / 'Contents/Info.plist'
+                info = plistlib.loads(path.read_bytes())
+                info['CFBundleVersion'] = '6'
+                path.write_bytes(plistlib.dumps(info))
             path = extension / 'Contents/Info.plist'
             info = plistlib.loads(path.read_bytes())
             del info['NSSystemExtensionUsageDescription']
