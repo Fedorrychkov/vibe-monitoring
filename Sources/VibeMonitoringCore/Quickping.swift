@@ -6,7 +6,7 @@ public enum QuickpingError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidServer: return "Enter an HTTPS server origin, without a path, credentials or query. HTTP is allowed only on loopback."
+        case .invalidServer: return "Enter your Quickping website address, for example https://quickping.tech."
         case .invalidCallback: return "The sign-in response did not match this connection attempt. Please try again."
         case .invalidResponse: return "Quickping returned an unsupported response."
         case .authorizationFailed: return "Quickping sign-in was not approved or the authorization code expired."
@@ -18,14 +18,17 @@ public enum QuickpingError: Error, LocalizedError {
 }
 
 public struct QuickpingServer: Sendable, Equatable {
+    public static let defaultOrigin = "https://quickping.tech"
     public let origin: URL
 
     public init(_ text: String) throws {
-        guard let parts = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
+        guard var parts = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
               let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil,
-              parts.query == nil, parts.fragment == nil, parts.path.isEmpty || parts.path == "/",
+              parts.query == nil, parts.fragment == nil, ["", "/", "/profile", "/profile/"].contains(parts.path),
               parts.scheme == "https" || (parts.scheme == "http" && ["localhost", "127.0.0.1", "[::1]"].contains(host)),
-              let url = parts.url else { throw QuickpingError.invalidServer }
+              parts.url != nil else { throw QuickpingError.invalidServer }
+        parts.path = ""
+        guard let url = parts.url else { throw QuickpingError.invalidServer }
         origin = url
     }
 

@@ -62,6 +62,7 @@ struct DashboardView: View {
 
             ScrollView {
                 LazyVStack(spacing: 10) {
+                    VPNView(store: store.vpn)
                     QuickpingView(store: store.quickping)
                     HStack {
                         Label("Codex", systemImage: "terminal").font(.headline)
@@ -86,7 +87,7 @@ struct DashboardView: View {
                 Text("Activity comes from local Codex journals. A quiet or crashed process may leave a stale signal.")
                     .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Label("Read only", systemImage: "lock.shield").font(.caption2).foregroundStyle(.secondary)
+                    Label("Codex read only", systemImage: "lock.shield").font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Button { Task { await store.refresh(); await store.quickping.refresh() } } label: {
                         Image(systemName: "arrow.clockwise")
@@ -99,7 +100,7 @@ struct DashboardView: View {
                     Button { NSApp.activate(ignoringOtherApps: true); openWindow(id: "preferences") } label: {
                         Image(systemName: "gearshape")
                     }.help("Settings")
-                    Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }.help("Quit VibeMonitoring")
+                    Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }.help("Quit menu app; an active VPN keeps running")
                 }.buttonStyle(.borderless)
             }.padding(.horizontal, 20).padding(.vertical, 12).background(.secondary.opacity(0.04))
         }
@@ -253,6 +254,7 @@ enum DemoPreview {
                 MetricCard(value: "1", title: "Active turns", symbol: "bolt.fill", color: .indigo)
                 MetricCard(value: "3", title: "Recent sessions", symbol: "square.stack.3d.up", color: .teal)
             }
+            VPNView(store: VPNStore(demo: true), showsSettings: false)
             Label("Codex", systemImage: "terminal").font(.headline).padding(.top, 6)
             ForEach(snapshot.sessions) { session in
                 SessionCard(session: session, initiallyExpanded: session.displayPhase() == .running)

@@ -116,7 +116,7 @@ struct QuickpingPreferencesView: View {
                     }
                 }
             } else {
-                TextField("Quickping server, e.g. https://quickping.example", text: $server).textFieldStyle(.roundedBorder)
+                TextField("Quickping server", text: $server, prompt: Text(QuickpingServer.defaultOrigin)).textFieldStyle(.roundedBorder)
                     .disabled(store.isConnecting)
                 HStack {
                     Button("Sign in with Quickping…") { store.connect(to: server) }.disabled(store.isConnecting)

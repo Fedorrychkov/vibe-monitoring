@@ -24,4 +24,11 @@ final class QuickpingTests: XCTestCase {
         }
         XCTAssertEqual(try QuickpingServer("http://127.0.0.1:3000").origin.port, 3000)
     }
+
+    func testProfileWebsiteURLUsesTheSameAPIOriginAsTheDefault() throws {
+        XCTAssertEqual(try QuickpingServer("https://quickping.tech/profile").origin,
+                       try QuickpingServer(QuickpingServer.defaultOrigin).origin)
+        XCTAssertEqual(try QuickpingServer("https://quickping.tech/profile/").endpoint("api/v1/integrations/monitoring").path,
+                       "/api/v1/integrations/monitoring")
+    }
 }

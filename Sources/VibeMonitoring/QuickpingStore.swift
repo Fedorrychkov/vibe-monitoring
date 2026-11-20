@@ -24,7 +24,8 @@ final class QuickpingStore: NSObject, ObservableObject, ASWebAuthenticationPrese
 
     init(demo: Bool) {
         self.demo = demo
-        serverText = demo ? "https://quickping.example" : UserDefaults.standard.string(forKey: "quickpingServer") ?? ""
+        let savedServer = UserDefaults.standard.string(forKey: "quickpingServer")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        serverText = demo ? "https://quickping.example" : savedServer.flatMap { $0.isEmpty ? nil : $0 } ?? QuickpingServer.defaultOrigin
         super.init()
         if demo { snapshot = DemoData.quickpingSnapshot(); return }
         do {

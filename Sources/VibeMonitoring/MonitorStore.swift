@@ -13,12 +13,14 @@ final class MonitorStore: ObservableObject {
     @Published var notificationIssue: String?
     let isDemo: Bool
     let quickping: QuickpingStore
+    let vpn: VPNStore
     private let scanner = CodexScanner()
     private var polling: Task<Void, Never>?
 
     init(demo: Bool = false, startPolling: Bool = true) {
         isDemo = demo
         quickping = QuickpingStore(demo: demo)
+        vpn = VPNStore(demo: demo)
         codexHome = UserDefaults.standard.string(forKey: "codexHome") ?? CodexScanner.defaultHome().path
         notifyOnFinish = UserDefaults.standard.bool(forKey: "notifyOnFinish")
         if demo { snapshot = DemoData.snapshot() }

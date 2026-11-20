@@ -6,7 +6,9 @@ A native macOS menu bar app for observing local Codex sessions. See recent activ
 
 ![VibeMonitoring components rendered with fictional demo data](docs/demo-preview.png)
 
-VibeMonitoring observes Codex locally and can connect to Quickping for read-only service monitoring. The Quickping server needs the desktop integration endpoints described in [the integration contract](docs/quickping-integration.md). VPN protection, subscription imports and additional agents are planned, not implemented. This version does not block direct network connections or protect against VPN failures.
+VibeMonitoring observes Codex locally and can connect to Quickping for read-only service monitoring. Quickping defaults to `https://quickping.tech`; self-hosted origins are supported. The server needs [the desktop integration endpoints](docs/quickping-integration.md).
+
+An **experimental VPN candidate** adds subscription import, server selection and a separate macOS packet-tunnel system extension. It is not installed or activated by the normal build. Installation is gated on signing and provisioning, and on-device crash/leak checks remain outstanding. **Do not rely on the candidate for protection yet.** See [VPN setup and validation](docs/vpn.md).
 
 ## What works
 
@@ -20,6 +22,7 @@ VibeMonitoring observes Codex locally and can connect to Quickping for read-only
 - A demo mode using fictional data for screenshots and development.
 - Optional Quickping sign-in through the system browser, with PKCE, explicit read-only consent and credentials in macOS Keychain.
 - Quickping service status, last check results, latency and open incident counts. Failed requests preserve previous results and mark them stale.
+- Optional Brave download/privacy-help links. No browser or personal browser profile is bundled or imported.
 
 Codex monitoring requires no account, API key or server. Quickping is optional. No third-party Swift package is required.
 
@@ -34,7 +37,9 @@ cd vibe-monitoring
 open dist/VibeMonitoring.app
 ```
 
-The script builds and ad-hoc signs a local `.app`. It does not install a helper, change login items or modify system networking. Public signed/notarized downloads are not available yet.
+The script builds and ad-hoc signs the monitoring-only `.app`. It does not install a helper, change login items or modify system networking. Public signed/notarized downloads are not available yet. The VPN candidate has a separate build command and certificate requirements in [the VPN guide](docs/vpn.md).
+
+Distribution is through this open-source repository and GitHub Releases only. The planned ready-to-install download is a Developer ID-signed, notarized DMG; there is no App Store release planned. People downloading that build will not need Xcode or an Apple Developer account.
 
 To run with fictional demo data:
 
@@ -87,13 +92,14 @@ Dollar costs are intentionally not inferred from a model name or subscription pl
 - `auth.json`, API keys and subscription links are not read.
 - Conversation text, command arguments and tool outputs are not displayed, persisted or uploaded. The JSONL files themselves contain these fields; the parser extracts only the metadata it needs.
 - Preferences store the selected Codex directory, notification toggle and non-secret Quickping server origin in macOS UserDefaults.
+- The VPN candidate stores subscriptions/server credentials in Keychain. VPN preferences contain a persistent Keychain reference and a non-secret node ID; no subscription URLs or UUIDs are written there.
 - Project folder names appear locally in the UI and, if enabled, finish notifications. Use `--demo` for public screenshots.
 
 ## Next modules
 
 1. **Quickping:** finish a live browser sign-in check against a deployed server; add per-service incident history later. Current integration covers the account's first 100 active services, with explicit truncation and unknown status for overdue server checks.
-2. **Network protection:** a separately authorized system component, with protected/blocked/unprotected states. Protection must survive GUI and VPN-client crashes. Disabling protection must be an explicit user action.
-3. **Connections:** supported subscription formats and VPN-core integration; no assumption that another app's private configuration is an import API.
+2. **Network protection:** provision/notarize the candidate and complete crash, DNS/IPv6, wake, network-change and reboot checks. Provider code and status evaluation are implemented, but compile/unit tests are not leak tests.
+3. **Connections:** extend the tested transport/format set after the initial plain/Base64 VLESS, VMessAEAD and Trojan paths. No assumption that another app's private configuration is an import API.
 4. **Other agents:** provider-specific event adapters. Claude Code is a candidate for hooks/OpenTelemetry; unknown processes must not be given invented progress or cost data.
 
 ## Contributing

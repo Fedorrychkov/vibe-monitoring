@@ -25,9 +25,7 @@ struct VibeMonitoringApp: App {
             DashboardView(store: store, popover: true)
         } label: {
             Image(systemName: "waveform.path.ecg")
-            Image(systemName: "shield.slash").foregroundStyle(.secondary)
-                .help("VPN protection is not configured yet")
-                .accessibilityLabel("VPN protection not configured")
+            VPNMenuIndicator(store: store.vpn)
             if store.snapshot.activeCount() > 0 { Text("\(store.snapshot.activeCount())") }
         }
         .menuBarExtraStyle(.window)

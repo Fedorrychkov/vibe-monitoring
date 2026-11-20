@@ -12,7 +12,14 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Test core and compile app
         run: swift test
+      - name: Test signing validation
+        run: python3 -m unittest discover -s Tests/BuildScriptsTests -v
       - name: Build local app bundle
         run: bash scripts/build-app.sh
+      - name: Compile optional VPN candidate without installing it
+        run: bash scripts/build-vpn-app.sh
