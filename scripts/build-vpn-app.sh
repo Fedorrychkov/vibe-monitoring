@@ -22,7 +22,7 @@ app=Path(sys.argv[1])
 base={
     'CFBundleIdentifier':'dev.vibemonitoring.app', 'CFBundleName':'VibeMonitoring',
     'CFBundleDisplayName':'VibeMonitoring', 'CFBundleExecutable':'VibeMonitoring', 'CFBundleIconFile':'AppIcon',
-    'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.3.2', 'CFBundleVersion':'7',
+    'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.3.3', 'CFBundleVersion':'8',
     'LSMinimumSystemVersion':'13.0','LSUIElement':True,'NSHighResolutionCapable':True,
     'NSPrincipalClass':'NSApplication','NSAppTransportSecurity':{'NSAllowsLocalNetworking':True},
     'NSSystemExtensionUsageDescription':'VibeMonitoring uses a separate VPN component to tunnel network traffic independently of the menu app.',
@@ -32,7 +32,7 @@ extension=app/'Contents/Library/SystemExtensions/dev.vibemonitoring.app.tunnel.s
 extension.write_bytes(plistlib.dumps({
     'CFBundleIdentifier':'dev.vibemonitoring.app.tunnel','CFBundleName':'VibeMonitoring Tunnel',
     'CFBundleExecutable':'VibeTunnel','CFBundlePackageType':'SYSX',
-    'CFBundleShortVersionString':'0.3.2','CFBundleVersion':'7','LSMinimumSystemVersion':'13.0',
+    'CFBundleShortVersionString':'0.3.3','CFBundleVersion':'8','LSMinimumSystemVersion':'13.0',
     'NSSystemExtensionUsageDescription':'VibeMonitoring tunnels network traffic through the VPN server you select.',
     'NetworkExtension':{
         'NEMachServiceName':'$(TeamIdentifierPrefix)dev.vibemonitoring.app.tunnel',

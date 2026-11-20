@@ -60,11 +60,11 @@ An older installed provider is not treated as ready for a newer app; install the
 /Applications/VibeMonitoring.app/Contents/MacOS/VibeMonitoring --check-vpn-storage
 ```
 
-The check uses the same authenticated XPC and storage code to write, read and delete a separate non-secret probe item. It does not read or change the selected server, subscription or any VPN's network configuration. Only the correctly signed app can call this service; a regular unsigned CLI process cannot write System Keychain data through it.
+The check uses the same authenticated XPC and storage code to create, update, read and delete a separate non-secret probe item, verifying that its persistent reference survives the update. Existing credentials are updated without changing their signed-code access list; replacing that list can require authorization UI unavailable to a system extension. The check does not read or change the selected server, subscription or any VPN's network configuration. Only the correctly signed app can call this service; a regular unsigned CLI process cannot write System Keychain data through it.
 
 The listener starts after `NEProvider.startSystemExtensionMode()`, using the Network Extension's App Group-prefixed Mach service, as in [Apple's Network Extension sample](https://developer.apple.com/documentation/networkextension/filtering-network-traffic). Both listener and client additionally apply explicit peer code-signing requirements.
 
-On-device check, 2026-11-20, version 0.3.2 (7): the signed app's probe passed; a separate unsigned client was rejected with XPC error 4097. The probe item was absent afterward, and no VibeMonitoring VPN configuration was created. These results cover credential preparation, not tunnel connectivity or leak protection.
+On-device check, 2026-11-20, version 0.3.2 (7): the signed app's create/read/delete probe passed; a separate unsigned client was rejected with XPC error 4097. The probe item was absent afterward. A subsequent user connection attempt created the VPN configuration but did not establish a working tunnel; a repeated enable failed with credential write error -25308. Version 0.3.3 adds the missing update check and preserves existing ACLs. Tunnel startup failures record only a fixed stage and numeric code, not server details or credentials. Connectivity and leak protection remain unverified.
 
 ## GitHub release packaging
 

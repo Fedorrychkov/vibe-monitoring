@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import NetworkExtension
+import os
 import VibeMonitoringCore
 import VibeXray
 
@@ -19,6 +20,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         work.async { [self] in
+            var stage = "configuration"
             do {
                 self.stopping = false
                 self.running = false
@@ -28,9 +30,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 guard let configuration = self.protocolConfiguration as? NETunnelProviderProtocol,
                       configuration.includeAllNetworks, configuration.enforceRoutes, !configuration.excludeLocalNetworks,
                       let reference = configuration.passwordReference else { throw VPNError.invalidConfiguration }
+                stage = "credential-read"
                 let node = try VPNKeychain.loadSelected(reference: reference)
                 guard configuration.providerConfiguration?["nodeID"] as? String == node.id else { throw VPNError.invalidConfiguration }
                 self.node = node
+                stage = "server-resolution"
                 let addresses = try self.resolve(node.host)
                 self.resolvedAddresses = addresses
                 let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: node.host)
@@ -56,11 +60,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                                 self?.work.async { [weak self] in self?.requestRestart() }
                             }
                             completionHandler(nil)
-                        } catch { completionHandler(VPNError.invalidConfiguration) }
+                        } catch {
+                            self.failStartup(stage: error is VPNCredentialFailure ? "credential-read" : "network-settings-or-core",
+                                             error: error, completionHandler: completionHandler)
+                        }
                     }
                 }
-            } catch { completionHandler(VPNError.invalidConfiguration) }
+            } catch { self.failStartup(stage: stage, error: error, completionHandler: completionHandler) }
         }
+    }
+
+    private func failStartup(stage: String, error: Error, completionHandler: (Error?) -> Void) {
+        // Fixed stages and numeric codes only; never log the selected node or configuration.
+        let code = (error as? VPNCredentialFailure)?.status ?? Int32(clamping: (error as NSError).code)
+        Logger(subsystem: "dev.vibemonitoring.app.tunnel", category: "startup")
+            .error("Tunnel startup failed at \(stage, privacy: .public); code \(code, privacy: .public)")
+        completionHandler(VPNError.invalidConfiguration)
     }
 
     private func startCore(_ node: VPNNode, addresses: [String]) throws {

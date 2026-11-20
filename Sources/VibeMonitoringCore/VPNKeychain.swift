@@ -45,31 +45,41 @@ public enum VPNKeychain {
         let account = UUID().uuidString
         let reference = try writeSystemData(Data("VibeMonitoring storage probe".utf8),
                                             service: "dev.vibemonitoring.app.credential-probe", account: account)
-        let status = SecItemDelete([kSecClass as String: kSecClassGenericPassword,
-                                    kSecValuePersistentRef as String: reference] as CFDictionary)
+        let deletion: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                       kSecValuePersistentRef as String: reference]
+        do {
+            let updatedReference = try writeSystemData(Data("VibeMonitoring updated storage probe".utf8),
+                                                       service: "dev.vibemonitoring.app.credential-probe", account: account)
+            guard updatedReference == reference else { throw VPNCredentialFailure(.reference, errSecInvalidItemRef) }
+        } catch {
+            _ = SecItemDelete(deletion as CFDictionary)
+            throw error
+        }
+        let status = SecItemDelete(deletion as CFDictionary)
         guard status == errSecSuccess else { throw VPNCredentialFailure(.cleanup, status) }
     }
 
     private static func writeSystemData(_ data: Data, service: String, account: String) throws -> Data {
         // Only the system extension may write here. The menu app uses authenticated XPC.
         guard geteuid() == 0 else { throw VPNCredentialFailure(.privileges, errSecAuthFailed) }
-        guard let executable = Bundle.main.executableURL else { throw VPNCredentialFailure(.trust, errSecParam) }
-        var trusted: SecTrustedApplication?
-        var status = SecTrustedApplicationCreateFromPath(executable.path, &trusted)
-        guard status == errSecSuccess, let trusted else { throw VPNCredentialFailure(.trust, status) }
-        var access: SecAccess?
-        status = SecAccessCreate("VibeMonitoring VPN credentials" as CFString, [trusted] as CFArray, &access)
-        guard status == errSecSuccess, let access else { throw VPNCredentialFailure(.trust, status) }
         var keychain: SecKeychain?
         // A system extension runs outside the user context and cannot read the user's Data Protection Keychain (TN3137).
-        status = SecKeychainOpen("/Library/Keychains/System.keychain", &keychain)
+        var status = SecKeychainOpen("/Library/Keychains/System.keychain", &keychain)
         guard status == errSecSuccess, let keychain else { throw VPNCredentialFailure(.open, status) }
         var base = query(service: service)
         base[kSecAttrAccount as String] = account
         base[kSecMatchSearchList as String] = [keychain]
-        let update: [String: Any] = [kSecValueData as String: data, kSecAttrAccess as String: access]
+        // Replacing an existing ACL requires authorization UI unavailable to a system extension.
+        let update: [String: Any] = [kSecValueData as String: data]
         status = SecItemUpdate(base as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
+            guard let executable = Bundle.main.executableURL else { throw VPNCredentialFailure(.trust, errSecParam) }
+            var trusted: SecTrustedApplication?
+            status = SecTrustedApplicationCreateFromPath(executable.path, &trusted)
+            guard status == errSecSuccess, let trusted else { throw VPNCredentialFailure(.trust, status) }
+            var access: SecAccess?
+            status = SecAccessCreate("VibeMonitoring VPN credentials" as CFString, [trusted] as CFArray, &access)
+            guard status == errSecSuccess, let access else { throw VPNCredentialFailure(.trust, status) }
             var item = query(service: service)
             item[kSecAttrAccount as String] = account
             item[kSecUseKeychain as String] = keychain
