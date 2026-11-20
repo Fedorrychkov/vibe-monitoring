@@ -108,12 +108,13 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             defer { busy = false }
             do {
                 let manager = try await loadManager() ?? NETunnelProviderManager()
+                let addresses = try await VPNEndpointResolver.resolve(node.host)
                 let reference = try await VPNCredentialClient.store(node)
                 let configuration = NETunnelProviderProtocol()
                 configuration.providerBundleIdentifier = VPNInstallation.providerID
                 configuration.serverAddress = node.host
                 configuration.passwordReference = reference
-                configuration.providerConfiguration = ["nodeID": node.id]
+                configuration.providerConfiguration = ["nodeID": node.id, "bootstrapAddresses": addresses]
                 configuration.includeAllNetworks = true
                 configuration.enforceRoutes = true
                 configuration.excludeLocalNetworks = false
@@ -137,6 +138,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             } catch {
                 state = requested ? .unverified : .off
                 let detail = (error as? VPNCredentialFailure)?.localizedDescription
+                    ?? (error as? VPNError)?.localizedDescription
                     ?? "VPN configuration or connection failed (code \((error as NSError).code))."
                 issue = detail + (requested ? " Protection is not confirmed; the protection request remains enabled."
                                           : " No VPN configuration was enabled.")
@@ -212,6 +214,8 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
               configuration.providerBundleIdentifier == VPNInstallation.providerID,
               configuration.includeAllNetworks, configuration.enforceRoutes, !configuration.excludeLocalNetworks,
               !configuration.disconnectOnSleep, configuration.passwordReference != nil,
+              let addresses = configuration.providerConfiguration?["bootstrapAddresses"] as? [String],
+              (try? VPNTunnelConfiguration.validatedAddresses(addresses)) != nil,
               let rules = manager.onDemandRules, rules.count == 1, let rule = rules.first as? NEOnDemandRuleConnect,
               rule.interfaceTypeMatch == .any, rule.ssidMatch == nil, rule.dnsSearchDomainMatch == nil,
               rule.dnsServerAddressMatch == nil, rule.probeURL == nil else { return false }

@@ -34,10 +34,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 let node = try VPNKeychain.loadSelected(reference: reference)
                 guard configuration.providerConfiguration?["nodeID"] as? String == node.id else { throw VPNError.invalidConfiguration }
                 self.node = node
-                stage = "server-resolution"
-                let addresses = try self.resolve(node.host)
+                stage = "bootstrap-addresses"
+                guard let saved = configuration.providerConfiguration?["bootstrapAddresses"] as? [String] else {
+                    throw VPNError.invalidConfiguration
+                }
+                let addresses = try VPNTunnelConfiguration.validatedAddresses(saved)
                 self.resolvedAddresses = addresses
-                let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: node.host)
+                let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: addresses[0])
                 settings.mtu = 1_400
                 let ipv4 = NEIPv4Settings(addresses: ["198.18.0.1"], subnetMasks: ["255.255.255.0"])
                 ipv4.includedRoutes = [NEIPv4Route.default()]
@@ -51,8 +54,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 settings.dnsSettings = dns
                 self.setTunnelNetworkSettings(settings) { error in
                     self.work.async {
+                        if let error {
+                            self.failStartup(stage: "network-settings", error: error, completionHandler: completionHandler)
+                            return
+                        }
                         do {
-                            if let error { throw error }
                             guard !self.stopping else { throw VPNError.providerUnavailable }
                             try self.startCore(node, addresses: addresses)
                             self.installWatchdog()
@@ -61,8 +67,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                             }
                             completionHandler(nil)
                         } catch {
-                            self.failStartup(stage: error is VPNCredentialFailure ? "credential-read" : "network-settings-or-core",
-                                             error: error, completionHandler: completionHandler)
+                            self.failStartup(stage: "core-startup", error: error, completionHandler: completionHandler)
                         }
                     }
                 }
@@ -151,30 +156,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                                            reasserting: self.reasserting, issue: self.issue)
             completionHandler?(try? JSONEncoder().encode(health))
         }
-    }
-
-    private func resolve(_ host: String) throws -> [String] {
-        var hints = addrinfo()
-        hints.ai_family = AF_UNSPEC
-        hints.ai_socktype = SOCK_STREAM
-        var first: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, nil, &hints, &first) == 0 else { throw VPNError.providerUnavailable }
-        defer { if let first { freeaddrinfo(first) } }
-        var addresses: [String] = []
-        var cursor = first
-        while let current = cursor, addresses.count < 32 {
-            let item = current.pointee
-            if let address = item.ai_addr, item.ai_family == AF_INET || item.ai_family == AF_INET6 {
-                var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                if getnameinfo(address, item.ai_addrlen, &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 {
-                    let value = String(cString: buffer)
-                    if !addresses.contains(value) { addresses.append(value) }
-                }
-            }
-            cursor = item.ai_next
-        }
-        guard !addresses.isEmpty else { throw VPNError.providerUnavailable }
-        return addresses
     }
 
     private func tunnelDescriptor() throws -> Int32 {

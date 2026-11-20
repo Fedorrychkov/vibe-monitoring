@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 public enum VPNError: Error, LocalizedError {
-    case engineMissing, invalidSubscription, unsupportedNode, insecureNode, invalidConfiguration, keychainUnavailable, signingRequired, providerUnavailable
+    case engineMissing, invalidSubscription, unsupportedNode, insecureNode, invalidConfiguration, keychainUnavailable, signingRequired, providerUnavailable, serverResolutionFailed
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +14,7 @@ public enum VPNError: Error, LocalizedError {
         case .keychainUnavailable: return "VPN credentials could not be accessed in macOS Keychain."
         case .signingRequired: return "VPN installation requires a signed Network Extension build and matching provisioning profiles."
         case .providerUnavailable: return "The VPN provider did not report a valid current state. Protection cannot be confirmed."
+        case .serverResolutionFailed: return "Could not resolve the selected VPN server before enabling protection. Check connectivity and try again."
         }
     }
 }
@@ -37,7 +38,7 @@ public struct VPNNode: Codable, Sendable, Identifiable, Equatable {
             destination = first
         }
         guard let host = destination["address"] as? String,
-              !host.isEmpty, host.count <= 253, !host.contains(where: { $0.isWhitespace || $0.isNewline }),
+              !host.isEmpty, host.count <= 253, !host.contains("\0"), !host.contains(where: { $0.isWhitespace || $0.isNewline }),
               let port = destination["port"] as? Int, (1...65_535).contains(port),
               outbound["proxySettings"] == nil else { throw VPNError.unsupportedNode }
         let stream = outbound["streamSettings"] as? [String: Any] ?? [:]
