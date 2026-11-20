@@ -22,6 +22,8 @@ public enum DemoData {
         finished.model = "example-model"
         finished.phase = .completed
         finished.lastActivity = now.addingTimeInterval(-74)
+        finished.stateChangedAt = finished.lastActivity
+        finished.turnDuration = 125
         finished.usage = TokenUsage(input: 48_000, cachedInput: 30_000, output: 4_800, total: 52_800)
 
         var stale = CodexSession(id: "demo-stale")

@@ -62,6 +62,7 @@ public struct CodexSession: Identifiable, Sendable {
     public var activeTurnID: String?
     public var lastActivity: Date?
     public var stateChangedAt: Date?
+    public var turnDuration: TimeInterval?
     public var usage: TokenUsage?
     public var usageObservedAt: Date?
     public var contextWindow: Int?
@@ -79,6 +80,10 @@ public struct CodexSession: Identifiable, Sendable {
     }
 
     public var shortID: String { String(id.prefix(8)) }
+
+    public var statusTimestamp: Date? {
+        phase == .completed || phase == .interrupted ? stateChangedAt : lastActivity
+    }
 
     public func displayPhase(at now: Date = Date(), staleAfter: TimeInterval = 180) -> SessionPhase {
         guard phase == .running || phase == .attention else { return phase }

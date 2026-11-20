@@ -48,6 +48,27 @@ final class JournalParserTests: XCTestCase {
         XCTAssertEqual(session.displayPhase(at: start.addingTimeInterval(999)), .interrupted)
     }
 
+    func testCompletionTimeAndDurationDoNotFollowLaterActivity() {
+        var session = CodexSession(id: "test")
+        apply(["type": "task_started", "turn_id": "first"], to: &session)
+        apply(["type": "task_complete", "turn_id": "first", "duration_ms": 1_500], second: 2, to: &session)
+        let completedAt = session.stateChangedAt
+        apply(["type": "token_count"], second: 5, to: &session)
+        XCTAssertEqual(session.statusTimestamp, completedAt)
+        XCTAssertNotEqual(session.statusTimestamp, session.lastActivity)
+        XCTAssertEqual(session.turnDuration, 1.5)
+
+        apply(["type": "task_started", "turn_id": "second"], second: 6, to: &session)
+        XCTAssertNil(session.turnDuration)
+        XCTAssertEqual(session.statusTimestamp, session.lastActivity)
+        apply(["type": "task_complete", "turn_id": "first", "duration_ms": 3_000], second: 7, to: &session)
+        XCTAssertNil(session.turnDuration)
+        XCTAssertEqual(session.phase, .running)
+        apply(["type": "turn_aborted", "turn_id": "second", "duration_ms": -1], second: 8, to: &session)
+        XCTAssertEqual(session.phase, .interrupted)
+        XCTAssertNil(session.turnDuration)
+    }
+
     func testLimitsAndMetadataAreParsedWithoutConversationFields() {
         var session = CodexSession(id: "test")
         apply(["id": "sample", "cwd": "/demo/project", "originator": "Codex CLI",

@@ -39,6 +39,7 @@ public struct JournalParser {
                     session.activeTurnID = payload.turnID
                     session.phase = .running
                     session.stateChangedAt = date
+                    session.turnDuration = nil
                 }
             case "task_complete", "turn_aborted":
                 let matchesTurn = session.activeTurnID == nil || payload.turnID == nil
@@ -46,6 +47,9 @@ public struct JournalParser {
                 if matchesTurn && canChangeState(at: date, in: session) {
                     session.phase = payload.type == "task_complete" ? .completed : .interrupted
                     session.stateChangedAt = date
+                    session.turnDuration = payload.durationMilliseconds.flatMap {
+                        $0.isFinite && $0 >= 0 ? $0 / 1_000 : nil
+                    }
                 }
             case "exec_approval_request", "apply_patch_approval_request", "request_user_input", "error":
                 if canChangeState(at: date, in: session) {
@@ -103,6 +107,7 @@ private struct Payload: Decodable {
     var info: TokenInfo?
     var rateLimits: Limits?
     var threadTokenUsage: Counters?
+    var durationMilliseconds: Double?
 
     enum CodingKeys: String, CodingKey {
         case id, cwd, originator, model, type, info
@@ -110,6 +115,7 @@ private struct Payload: Decodable {
         case turnID = "turn_id"
         case rateLimits = "rate_limits"
         case threadTokenUsage = "thread_token_usage"
+        case durationMilliseconds = "duration_ms"
     }
 }
 

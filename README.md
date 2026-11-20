@@ -12,6 +12,7 @@ The first release is a **read-only Codex monitor**. VPN protection, subscription
 
 - Menu bar indicator with the number of recently observed active turns.
 - Session list grouped by project, with active, finished, interrupted and stale states.
+- Explicit relative timestamps; completed turns keep their completion time. Recorded turn duration is shown in details when available.
 - Cumulative input, cached input and output token snapshots from Codex.
 - Last reported short and long usage windows, when present in the journals.
 - Optional notifications when a turn observed as active finishes.

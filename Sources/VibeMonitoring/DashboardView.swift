@@ -144,9 +144,12 @@ struct SessionCard: View {
                     Text(session.projectName).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                     HStack(spacing: 5) {
                         Text(phase.title).foregroundStyle(phase.color)
-                        if let date = session.lastActivity {
+                        if let date = session.statusTimestamp {
                             Text("·").foregroundStyle(.tertiary)
-                            Text(date, style: .relative).foregroundStyle(.secondary)
+                            if phase != .completed && phase != .interrupted {
+                                Text("Activity").foregroundStyle(.secondary)
+                            }
+                            Text(date, format: .relative(presentation: .numeric)).foregroundStyle(.secondary)
                         }
                     }.font(.system(size: 10))
                 }
@@ -158,6 +161,7 @@ struct SessionCard: View {
             }
 
             if let usage = session.usage {
+                Text("Recorded thread totals").font(.system(size: 9)).foregroundStyle(.secondary)
                 HStack(spacing: 12) {
                     token("IN", usage.input)
                     token("CACHE", usage.cachedInput)
@@ -171,6 +175,9 @@ struct SessionCard: View {
                 LabeledContent("Source", value: session.origin ?? "Codex")
                 LabeledContent("Model", value: session.model ?? "Not in recent events")
                 LabeledContent("Session", value: session.shortID)
+                if let duration = session.turnDuration {
+                    LabeledContent("Turn duration", value: Duration.seconds(duration).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated)))
+                }
                 if let primary = session.primaryWindow { QuotaView(window: primary) }
                 if let secondary = session.secondaryWindow { QuotaView(window: secondary) }
                 if let usage = session.usage {
