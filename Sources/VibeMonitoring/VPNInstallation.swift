@@ -4,25 +4,21 @@ import Security
 enum VPNInstallation {
     static let providerID = "dev.vibemonitoring.app.tunnel"
 
-    static var group: String? { Bundle.main.object(forInfoDictionaryKey: "VibeVPNKeychainGroup") as? String }
-
     static var signingReady: Bool {
         let extensionURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions/\(providerID).systemextension")
-        guard let group, let main = signingInfo(Bundle.main.bundleURL),
+        guard let main = signingInfo(Bundle.main.bundleURL),
               let team = main[kSecCodeInfoTeamIdentifier as String] as? String,
-              group.hasPrefix(team + "."),
               let appEntitlements = main[kSecCodeInfoEntitlementsDict as String] as? [String: Any],
               appEntitlements["com.apple.developer.system-extension.install"] as? Bool == true,
-              validEntitlements(appEntitlements, group: group),
+              validEntitlements(appEntitlements),
               let ext = signingInfo(extensionURL), ext[kSecCodeInfoTeamIdentifier as String] as? String == team,
               let entitlements = ext[kSecCodeInfoEntitlementsDict as String] as? [String: Any],
-              validEntitlements(entitlements, group: group) else { return false }
+              validEntitlements(entitlements) else { return false }
         return true
     }
 
-    private static func validEntitlements(_ values: [String: Any], group: String) -> Bool {
+    private static func validEntitlements(_ values: [String: Any]) -> Bool {
         (values["com.apple.developer.networking.networkextension"] as? [String])?.contains("packet-tunnel-provider-systemextension") == true
-            && (values["keychain-access-groups"] as? [String])?.contains(group) == true
     }
 
     private static func signingInfo(_ url: URL) -> [String: Any]? {

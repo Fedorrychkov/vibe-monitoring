@@ -9,7 +9,7 @@ The candidate uses pinned XTLS/libXray v26.11.9 inside a macOS packet-tunnel sys
 - HTTPS subscription import, plain/Base64 share-link lists, up to 4 MiB and 200 nodes. Cookies and redirects are not used. Failed imports keep the last saved subscription.
 - VLESS TLS/Reality, VMessAEAD and Trojan with compatible TCP/RAW, WebSocket, gRPC or HTTPUpgrade settings. Four fictional native-core fixtures cover VLESS/TLS, Reality/TCP, VMessAEAD/WS and Trojan/TLS.
 - Legacy VMess QR JSON, arbitrary Xray JSON, Clash/YAML, XHTTP, FinalMask and advanced chained configurations are **not supported by this first candidate**. Unsupported nodes are omitted; an empty result fails. TLS verification cannot be disabled. Confirm your provider's exported format before depending on import.
-- Subscription URL and nodes live in the app's private Keychain item. The selected node is copied to a shared Data Protection Keychain item; the OS VPN profile holds its reference and node hash.
+- Subscription URL and nodes live in the app's private user Keychain item. The selected node is copied to the file-based System Keychain with an access list for the signed app/provider; saving may require macOS authorization. The OS VPN profile holds only its reference and node hash. A system extension cannot read the user's Data Protection Keychain. [Apple keychain contexts](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains).
 - Full IPv4/IPv6 routes, tunnel DNS, `includeAllNetworks`, enforced routes and a match-all On Demand rule. Additional optional exclusions are disabled. The core gets only the selected proxy outbound, without a `freedom`/direct fallback.
 - Provider health through `NETunnelProviderSession`, checked against the selected node and saved policy. Missing, contradictory or stale evidence never turns the shield green.
 - A stopped core triggers reassertion and retry with backoff. Wake/default-path changes request a core restart. Failures do not turn off the saved protection request or delete the VPN policy.
@@ -41,7 +41,7 @@ Prepare a Developer ID Application identity and Developer ID provisioning profil
 - `dev.vibemonitoring.app`
 - `dev.vibemonitoring.app.tunnel`
 
-Both profiles must authorize `packet-tunnel-provider-systemextension` and the shared Keychain group `TEAM_ID.dev.vibemonitoring.vpn` (or an authorizing wildcard). The signing script narrows entitlements, rejects mismatched/expired/development profiles, adds system-extension installation to the host and sandboxes the provider with network access.
+Both profiles must authorize `packet-tunnel-provider-systemextension`. The signing script narrows entitlements, rejects mismatched/expired/development profiles, adds system-extension installation to the host and sandboxes the provider with network access. File-based System Keychain access uses signed-code access lists rather than a Data Protection Keychain sharing entitlement.
 
 ```sh
 python3 scripts/sign-vpn.py \

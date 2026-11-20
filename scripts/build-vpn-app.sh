@@ -25,7 +25,6 @@ base={
     'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.3.0', 'CFBundleVersion':'5',
     'LSMinimumSystemVersion':'13.0','LSUIElement':True,'NSHighResolutionCapable':True,
     'NSPrincipalClass':'NSApplication','NSAppTransportSecurity':{'NSAllowsLocalNetworking':True},
-    'VibeVPNKeychainGroup':'UNPROVISIONED.dev.vibemonitoring.vpn',
     'NSSystemExtensionUsageDescription':'VibeMonitoring uses a separate VPN component to tunnel network traffic independently of the menu app.',
 }
 (app/'Contents/Info.plist').write_bytes(plistlib.dumps(base))

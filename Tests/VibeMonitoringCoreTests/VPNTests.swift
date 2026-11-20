@@ -65,6 +65,15 @@ final class VPNTests: XCTestCase {
         XCTAssertThrowsError(try VPNTunnelConfiguration.build(node: node, descriptor: 9, addresses: ["not-an-address"]))
     }
 
+    func testSelectedKeychainStorageRequiresBothTrustedExecutablesBeforeWriting() throws {
+        let node = try VPNNode(outbound: outbound(), index: 0)
+        for urls: [URL] in [[], [URL(fileURLWithPath: "/not-used")]] {
+            XCTAssertThrowsError(try VPNKeychain.saveSelected(node, trustedExecutables: urls)) { error in
+                XCTAssertEqual(error as? VPNError, .invalidConfiguration)
+            }
+        }
+    }
+
     func testUnverifiedOrStaleProviderStateNeverTurnsTheShieldGreen() {
         let health = VPNProviderHealth(nodeID: "demo", running: true, reasserting: false, issue: nil)
         XCTAssertEqual(VPNProtectionState.evaluate(requested: true, policyValid: true, system: "connected", health: health, healthAge: 1, expectedNodeID: "demo"), .connected)

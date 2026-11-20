@@ -2,7 +2,6 @@
 """Sign a VPN candidate; never install, activate or connect it."""
 import argparse
 import datetime
-import fnmatch
 from pathlib import Path
 import plistlib
 import re
@@ -10,7 +9,6 @@ import shutil
 import subprocess
 import tempfile
 
-GROUP_SUFFIX = 'dev.vibemonitoring.vpn'
 CAPABILITY = 'packet-tunnel-provider-systemextension'
 
 
@@ -33,15 +31,11 @@ def validate_profile(data, bundle_id, now=None):
         raise RuntimeError('Provisioning profile has the wrong application identifier')
     if CAPABILITY not in source.get('com.apple.developer.networking.networkextension', []):
         raise RuntimeError('Profile does not authorize a packet-tunnel system extension')
-    group = team + '.' + GROUP_SUFFIX
-    if not any(fnmatch.fnmatchcase(group, pattern) for pattern in source.get('keychain-access-groups', [])):
-        raise RuntimeError('Profile does not authorize the shared VPN Keychain group')
     if data.get('ProvisionsAllDevices') is not True or source.get('get-task-allow') or source.get('com.apple.security.get-task-allow'):
         raise RuntimeError('Use Developer ID provisioning profiles for direct distribution')
     entitlements = {
         key: source[key], 'com.apple.developer.team-identifier': team,
         'com.apple.developer.networking.networkextension': [CAPABILITY],
-        'keychain-access-groups': [group],
     }
     return team, entitlements
 
@@ -76,10 +70,6 @@ def main():
     extension = app / 'Contents/Library/SystemExtensions/dev.vibemonitoring.app.tunnel.systemextension'
     if not extension.is_dir():
         raise RuntimeError('Build the VPN candidate first')
-    app_info = app / 'Contents/Info.plist'
-    info = plistlib.loads(app_info.read_bytes())
-    info['VibeVPNKeychainGroup'] = app_team + '.' + GROUP_SUFFIX
-    app_info.write_bytes(plistlib.dumps(info))
     ext_info = extension / 'Contents/Info.plist'
     info = plistlib.loads(ext_info.read_bytes())
     info['NetworkExtension']['NEMachServiceName'] = app_team + '.dev.vibemonitoring.app.tunnel'

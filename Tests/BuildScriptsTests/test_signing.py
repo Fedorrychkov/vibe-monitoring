@@ -26,16 +26,15 @@ class SigningTests(unittest.TestCase):
         team, ent = signing.validate_profile(self.profile(), 'dev.vibemonitoring.app')
         self.assertEqual(team, 'ABCDE12345')
         self.assertEqual(ent['com.apple.developer.networking.networkextension'], [signing.CAPABILITY])
-        self.assertEqual(ent['keychain-access-groups'], ['ABCDE12345.dev.vibemonitoring.vpn'])
+        self.assertNotIn('keychain-access-groups', ent)
         self.assertNotIn('unrelated-capability', ent)
 
-    def test_expired_wrong_app_missing_group_and_development_profiles_fail(self):
+    def test_expired_wrong_app_missing_capability_and_development_profiles_fail(self):
         for patch in [{'ExpirationDate': datetime.datetime(2000, 1, 1)}, {'ProvisionsAllDevices': False}]:
             profile = self.profile(); profile.update(patch)
             with self.assertRaises(RuntimeError): signing.validate_profile(profile, 'dev.vibemonitoring.app')
         for key, value in [
             ('com.apple.application-identifier', 'ABCDE12345.other.app'),
-            ('keychain-access-groups', ['ABCDE12345.unrelated']),
             ('com.apple.developer.networking.networkextension', ['packet-tunnel-provider']),
             ('get-task-allow', True),
         ]:

@@ -100,7 +100,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
 
     func enable() {
         guard !demo, !busy else { return }
-        guard engineAvailable, signed, installed, let group = VPNInstallation.group,
+        guard engineAvailable, signed, installed, let executable = Bundle.main.executableURL,
               let node = subscription?.selected else { issue = VPNError.signingRequired.localizedDescription; return }
         busy = true
         issue = nil
@@ -108,7 +108,8 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             defer { busy = false }
             do {
                 let manager = try await loadManager() ?? NETunnelProviderManager()
-                let reference = try VPNKeychain.saveSelected(node, group: group)
+                let provider = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions/\(VPNInstallation.providerID).systemextension/Contents/MacOS/VibeTunnel")
+                let reference = try VPNKeychain.saveSelected(node, trustedExecutables: [executable, provider])
                 let configuration = NETunnelProviderProtocol()
                 configuration.providerBundleIdentifier = VPNInstallation.providerID
                 configuration.serverAddress = node.host
