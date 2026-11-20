@@ -6,6 +6,7 @@ swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP_DIR="$PWD/dist/VibeMonitoring.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+cp Assets/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
 cp "$BIN_DIR/VibeMonitoring" "$APP_DIR/Contents/MacOS/.VibeMonitoring.new"
 mv -f "$APP_DIR/Contents/MacOS/.VibeMonitoring.new" "$APP_DIR/Contents/MacOS/VibeMonitoring"
 cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
@@ -15,6 +16,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>dev.vibemonitoring.app</string>
   <key>CFBundleName</key><string>VibeMonitoring</string>
   <key>CFBundleDisplayName</key><string>VibeMonitoring</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleExecutable</key><string>VibeMonitoring</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.2.1</string>

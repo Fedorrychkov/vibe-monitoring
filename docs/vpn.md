@@ -43,6 +43,8 @@ Prepare a Developer ID Application identity and Developer ID provisioning profil
 
 Both profiles must authorize `packet-tunnel-provider-systemextension`. The signing script narrows entitlements, rejects mismatched/expired/development profiles, adds system-extension installation to the host and sandboxes the provider with network access. File-based System Keychain access uses signed-code access lists rather than a Data Protection Keychain sharing entitlement.
 
+Both bundles include `NSSystemExtensionUsageDescription`. Their macOS App Group is `TEAM_ID.dev.vibemonitoring.app`, which is a prefix of the provider's Mach service name. macOS uses the Team-ID-prefixed group for signed app/provider IPC; it is not the user Keychain sharing mechanism.
+
 ```sh
 python3 scripts/sign-vpn.py \
   --identity 'Developer ID Application: YOUR NAME (TEAM_ID)' \

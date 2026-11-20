@@ -1,7 +1,9 @@
 import copy
 import datetime
 import importlib.util
+import plistlib
 from pathlib import Path
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +13,22 @@ spec.loader.exec_module(signing)
 
 
 class SigningTests(unittest.TestCase):
+    def test_system_extension_usage_description_is_required_in_both_bundles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app, extension = Path(directory) / 'App', Path(directory) / 'Extension'
+            for bundle, identifier in [(app, 'dev.vibemonitoring.app'), (extension, 'dev.vibemonitoring.app.tunnel')]:
+                (bundle / 'Contents').mkdir(parents=True)
+                info = {'CFBundleIdentifier': identifier, 'CFBundleShortVersionString': '0.3.1',
+                        'CFBundleVersion': '6', 'NSSystemExtensionUsageDescription': 'VPN protection'}
+                (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
+            signing.validate_bundle_metadata(app, extension)
+            path = extension / 'Contents/Info.plist'
+            info = plistlib.loads(path.read_bytes())
+            del info['NSSystemExtensionUsageDescription']
+            path.write_bytes(plistlib.dumps(info))
+            with self.assertRaisesRegex(RuntimeError, 'NSSystemExtensionUsageDescription'):
+                signing.validate_bundle_metadata(app, extension)
+
     def profile(self):
         return {
             'ExpirationDate': datetime.datetime(2099, 1, 1), 'TeamIdentifier': ['ABCDE12345'],

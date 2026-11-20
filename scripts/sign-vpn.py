@@ -45,6 +45,20 @@ def load_profile(path, bundle_id):
     return validate_profile(plistlib.loads(decoded), bundle_id)
 
 
+def validate_bundle_metadata(app, extension):
+    versions = []
+    for bundle, identifier in [(app, 'dev.vibemonitoring.app'), (extension, 'dev.vibemonitoring.app.tunnel')]:
+        info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
+        if info.get('CFBundleIdentifier') != identifier:
+            raise RuntimeError('Unexpected bundle identifier')
+        description = info.get('NSSystemExtensionUsageDescription')
+        if not isinstance(description, str) or not description.strip():
+            raise RuntimeError('Both app and system extension need NSSystemExtensionUsageDescription')
+        versions.append((info.get('CFBundleShortVersionString'), info.get('CFBundleVersion')))
+    if versions[0] != versions[1] or not all(versions[0]):
+        raise RuntimeError('App and system extension versions must match')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--identity', required=True, help='Developer ID Application certificate name or SHA-1')
@@ -62,6 +76,9 @@ def main():
         raise RuntimeError('Both profiles must belong to the same team')
     if '(' + app_team + ')' not in matches[0]:
         raise RuntimeError('Signing identity must belong to the provisioning profiles team')
+    # macOS Team-ID-prefixed App Groups authorize the Network Extension Mach service.
+    for entitlements in [app_ent, ext_ent]:
+        entitlements['com.apple.security.application-groups'] = [app_team + '.dev.vibemonitoring.app']
     app_ent['com.apple.developer.system-extension.install'] = True
     ext_ent.update({'com.apple.security.app-sandbox': True, 'com.apple.security.network.client': True,
                     'com.apple.security.network.server': True})
@@ -70,6 +87,7 @@ def main():
     extension = app / 'Contents/Library/SystemExtensions/dev.vibemonitoring.app.tunnel.systemextension'
     if not extension.is_dir():
         raise RuntimeError('Build the VPN candidate first')
+    validate_bundle_metadata(app, extension)
     ext_info = extension / 'Contents/Info.plist'
     info = plistlib.loads(ext_info.read_bytes())
     info['NetworkExtension']['NEMachServiceName'] = app_team + '.dev.vibemonitoring.app.tunnel'

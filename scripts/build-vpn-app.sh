@@ -21,8 +21,8 @@ from pathlib import Path
 app=Path(sys.argv[1])
 base={
     'CFBundleIdentifier':'dev.vibemonitoring.app', 'CFBundleName':'VibeMonitoring',
-    'CFBundleDisplayName':'VibeMonitoring', 'CFBundleExecutable':'VibeMonitoring',
-    'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.3.0', 'CFBundleVersion':'5',
+    'CFBundleDisplayName':'VibeMonitoring', 'CFBundleExecutable':'VibeMonitoring', 'CFBundleIconFile':'AppIcon',
+    'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.3.1', 'CFBundleVersion':'6',
     'LSMinimumSystemVersion':'13.0','LSUIElement':True,'NSHighResolutionCapable':True,
     'NSPrincipalClass':'NSApplication','NSAppTransportSecurity':{'NSAllowsLocalNetworking':True},
     'NSSystemExtensionUsageDescription':'VibeMonitoring uses a separate VPN component to tunnel network traffic independently of the menu app.',
@@ -32,7 +32,8 @@ extension=app/'Contents/Library/SystemExtensions/dev.vibemonitoring.app.tunnel.s
 extension.write_bytes(plistlib.dumps({
     'CFBundleIdentifier':'dev.vibemonitoring.app.tunnel','CFBundleName':'VibeMonitoring Tunnel',
     'CFBundleExecutable':'VibeTunnel','CFBundlePackageType':'SYSX',
-    'CFBundleShortVersionString':'0.3.0','CFBundleVersion':'5','LSMinimumSystemVersion':'13.0',
+    'CFBundleShortVersionString':'0.3.1','CFBundleVersion':'6','LSMinimumSystemVersion':'13.0',
+    'NSSystemExtensionUsageDescription':'VibeMonitoring tunnels network traffic through the VPN server you select.',
     'NetworkExtension':{
         'NEMachServiceName':'$(TeamIdentifierPrefix)dev.vibemonitoring.app.tunnel',
         'NEProviderClasses':{'com.apple.networkextension.packet-tunnel':'VibePacketTunnelProvider'},
@@ -40,6 +41,7 @@ extension.write_bytes(plistlib.dumps({
 }))
 PY
 cp LICENSE "$VPN_APP_DIR/Contents/Resources/VibeMonitoring-LICENSE"
+cp Assets/AppIcon.icns "$VPN_APP_DIR/Contents/Resources/AppIcon.icns"
 cp THIRD_PARTY_NOTICES.md "$VPN_APP_DIR/Contents/Resources/THIRD_PARTY_NOTICES.md"
 codesign --force --sign - "$VPN_EXTENSION_DIR"
 codesign --force --sign - "$VPN_APP_DIR"
