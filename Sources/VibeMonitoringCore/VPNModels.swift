@@ -114,6 +114,7 @@ public struct VPNProviderHealth: Codable, Sendable {
     public let running: Bool
     public let reasserting: Bool
     public let issue: String?
+    public var interfaceName: String? = nil
 
     public init(nodeID: String, running: Bool, reasserting: Bool, issue: String?) {
         self.nodeID = nodeID

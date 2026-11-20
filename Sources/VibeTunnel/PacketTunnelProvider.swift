@@ -13,6 +13,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var stopping = false
     private var running = false
     private var issue: String?
+    private var interfaceName: String?
     private var watchdog: DispatchSourceTimer?
     private var pathObservation: NSKeyValueObservation?
     private var retryDelay: Double = 1
@@ -150,10 +151,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     override func wake() { work.async { self.requestRestart() } }
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
-        guard messageData == Data("status".utf8) else { completionHandler?(nil); return }
         work.async {
-            let health = VPNProviderHealth(nodeID: self.node?.id ?? "", running: self.running,
+            if messageData != Data("status".utf8) {
+                do {
+                    let change = try VPNServerChange.decode(messageData)
+                    let node = try VPNKeychain.loadSelected(reference: change.reference)
+                    guard !self.stopping, node.id == change.nodeID else { throw VPNError.invalidConfiguration }
+                    // Keep the interface and full-tunnel policy installed throughout the core replacement.
+                    self.reasserting = true
+                    self.running = false
+                    self.issue = "server-switching"
+                    self.node = node
+                    self.resolvedAddresses = change.addresses
+                    self.retryAt = 0
+                    self.recoverIfDue()
+                } catch { completionHandler?(nil); return }
+            }
+            var health = VPNProviderHealth(nodeID: self.node?.id ?? "", running: self.running,
                                            reasserting: self.reasserting, issue: self.issue)
+            health.interfaceName = self.interfaceName
             completionHandler?(try? JSONEncoder().encode(health))
         }
     }
@@ -164,7 +180,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             var name = [CChar](repeating: 0, count: Int(IFNAMSIZ))
             var length = socklen_t(name.count)
             if getsockopt(fd, SYSPROTO_CONTROL, 2, &name, &length) == 0,
-               String(cString: name).hasPrefix("utun") { return fd }
+               String(cString: name).hasPrefix("utun") {
+                interfaceName = String(cString: name)
+                return fd
+            }
         }
         throw VPNError.providerUnavailable
     }

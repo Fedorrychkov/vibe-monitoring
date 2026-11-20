@@ -20,6 +20,7 @@ An **experimental VPN candidate** adds subscription import, server selection and
 - Optional notifications when a turn observed as active finishes.
 - Custom Codex home directory, refresh controls and a separate dashboard window.
 - A demo mode using fictional data for screenshots and development.
+- VPN candidate: menu status shield, passive receive/send rates and explicit DNS/HTTPS latency checks. In-place server switching is experimental and can interrupt existing connections.
 - Optional Quickping sign-in through the system browser, with PKCE, explicit read-only consent and credentials in macOS Keychain.
 - Quickping service status, last check results, latency and open incident counts. Failed requests preserve previous results and mark them stale.
 - Optional Brave download/privacy-help links. No browser or personal browser profile is bundled or imported.

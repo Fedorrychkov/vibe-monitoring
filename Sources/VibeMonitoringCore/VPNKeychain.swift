@@ -38,7 +38,7 @@ public enum VPNKeychain {
 
     public static func saveSelected(_ node: VPNNode) throws -> Data {
         _ = try node.validatedOutbound()
-        return try writeSystemData(JSONEncoder().encode(node), service: "dev.vibemonitoring.app.active-vpn", account: "configuration")
+        return try writeSystemData(JSONEncoder().encode(node), service: "dev.vibemonitoring.app.active-vpn", account: node.id)
     }
 
     public static func probeSelectedStorage() throws {

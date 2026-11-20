@@ -5,6 +5,7 @@ import VibeMonitoringCore
 @main
 struct VibeMonitoringApp: App {
     @StateObject private var store: MonitorStore
+    @ObservedObject private var vpn: VPNStore
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -31,16 +32,19 @@ struct VibeMonitoringApp: App {
                 exit(1)
             }
         }
-        _store = StateObject(wrappedValue: MonitorStore(demo: CommandLine.arguments.contains("--demo")))
+        let monitor = MonitorStore(demo: CommandLine.arguments.contains("--demo"))
+        _store = StateObject(wrappedValue: monitor)
+        _vpn = ObservedObject(wrappedValue: monitor.vpn)
     }
 
     var body: some Scene {
         MenuBarExtra {
             DashboardView(store: store, popover: true)
         } label: {
-            Image(systemName: "waveform.path.ecg")
-            VPNMenuIndicator(store: store.vpn)
-            if store.snapshot.activeCount() > 0 { Text("\(store.snapshot.activeCount())") }
+            Image(nsImage: VPNMenuIcon.make(vpn.state)).renderingMode(.original)
+                .accessibilityLabel(vpn.state.title).help(vpn.state.title)
+            Text([vpn.traffic?.title, store.snapshot.activeCount() > 0 ? "\(store.snapshot.activeCount())" : nil]
+                .compactMap { $0 }.joined(separator: " · ")).monospacedDigit()
         }
         .menuBarExtraStyle(.window)
 

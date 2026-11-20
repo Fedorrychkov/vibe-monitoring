@@ -16,6 +16,10 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     @Published private(set) var busy = false
     @Published private(set) var installed = false
     @Published private(set) var requested = false
+    @Published private(set) var traffic: VPNTrafficRate?
+    @Published private(set) var networkReport: VPNConnectivityReport?
+    @Published private(set) var checkingNetwork = false
+    private var trafficSample: VPNTrafficSample?
     let demo: Bool
     private var polling: Task<Void, Never>?
     private var activation: OSSystemExtensionRequest?
@@ -55,6 +59,15 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
 
     deinit { polling?.cancel() }
 
+    func checkNetwork() {
+        guard !demo, !checkingNetwork else { return }
+        checkingNetwork = true
+        Task {
+            networkReport = await VPNConnectivityCheck.run()
+            checkingNetwork = false
+        }
+    }
+
     func importSubscription(_ text: String) {
         guard !demo, !busy, !requested else { return }
         #if VIBE_VPN
@@ -77,10 +90,49 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     }
 
     func select(_ id: String) {
-        guard !busy, !requested, var next = subscription, next.nodes.contains(where: { $0.id == id }) else { return }
+        guard !demo, !busy, var next = subscription, next.selectedID != id,
+              let node = next.nodes.first(where: { $0.id == id }) else { return }
+        if requested { switchServer(node, subscription: next); return }
         next.selectedID = id
         do { try VPNKeychain.saveSubscription(next); subscription = next }
         catch { issue = VPNError.keychainUnavailable.localizedDescription }
+    }
+
+    private func switchServer(_ node: VPNNode, subscription next: VPNSubscription) {
+        busy = true
+        issue = nil
+        Task {
+            defer { busy = false }
+            var committed = false
+            do {
+                guard let manager = try await loadManager(), policyValid(manager),
+                      manager.connection.status == .connected,
+                      let configuration = manager.protocolConfiguration as? NETunnelProviderProtocol,
+                      let session = manager.connection as? NETunnelProviderSession else { throw VPNError.providerUnavailable }
+                let addresses = try await VPNEndpointResolver.resolve(node.host)
+                let reference = try await VPNCredentialClient.store(node)
+                let change = try VPNServerChange(nodeID: node.id, reference: reference, addresses: addresses)
+                configuration.serverAddress = node.host
+                configuration.passwordReference = reference
+                configuration.providerConfiguration = ["nodeID": node.id, "bootstrapAddresses": addresses]
+                manager.protocolConfiguration = configuration
+                try await save(manager)
+                committed = true
+                var updated = next
+                updated.selectedID = node.id
+                subscription = updated
+                // Persist the new intent before contacting the provider; a failed reply must never show old health as green.
+                try VPNKeychain.saveSubscription(updated)
+                state = .connecting
+                let reply = try await Self.providerReply(session, message: JSONEncoder().encode(change), timeout: 10)
+                let health = try JSONDecoder().decode(VPNProviderHealth.self, from: reply)
+                guard health.nodeID == node.id else { throw VPNError.providerUnavailable }
+                state = .connecting
+            } catch {
+                if committed { state = .unverified }
+                issue = "Server change was not confirmed. The protection request remains enabled."
+            }
+        }
     }
 
     func install() {
@@ -200,10 +252,15 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             state = VPNProtectionState.evaluate(requested: requested, policyValid: policyValid(manager), system: system,
                                                  health: health, healthAge: health == nil ? nil : 0,
                                                  expectedNodeID: subscription?.selectedID)
+            if state == .connected, let name = health?.interfaceName, let sample = VPNTrafficSample.read(name) {
+                traffic = VPNTrafficRate.between(trafficSample, sample)
+                trafficSample = sample
+            } else { traffic = nil; trafficSample = nil }
             if state == .connected { issue = nil }
         } catch {
             guard !busy else { return }
             state = requested ? .unverified : .off
+            traffic = nil; trafficSample = nil
             if requested { issue = VPNError.providerUnavailable.localizedDescription }
         }
     }
@@ -252,12 +309,12 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         }
     }
 
-    private static func providerReply(_ session: NETunnelProviderSession) async throws -> Data {
+    private static func providerReply(_ session: NETunnelProviderSession, message: Data = Data("status".utf8), timeout: Double = 2) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             let reply = VPNReply(continuation)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { reply.complete(.failure(VPNError.providerUnavailable)) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { reply.complete(.failure(VPNError.providerUnavailable)) }
             do {
-                try session.sendProviderMessage(Data("status".utf8)) { data in
+                try session.sendProviderMessage(message) { data in
                     if let data, data.count <= 4_096 { reply.complete(.success(data)) }
                     else { reply.complete(.failure(VPNError.providerUnavailable)) }
                 }

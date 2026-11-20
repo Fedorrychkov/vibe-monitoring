@@ -34,15 +34,21 @@ extension VPNProtectionState {
     }
 }
 
-struct VPNMenuIndicator: View {
-    @ObservedObject var store: VPNStore
-
-    var body: some View {
-        let base = NSImage(systemSymbolName: store.state.symbol, accessibilityDescription: store.state.title) ?? NSImage(size: NSSize(width: 16, height: 16))
-        let icon = base.withSymbolConfiguration(.init(paletteColors: [store.state.nsColor])) ?? base
+enum VPNMenuIcon {
+    static func make(_ state: VPNProtectionState) -> NSImage {
+        let icon = NSImage(size: NSSize(width: 34, height: 18), flipped: false) { _ in
+            let pulse = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(paletteColors: [.systemPurple]))
+            let colors: [NSColor] = [.connected, .blocked, .unverified].contains(state) ? [.white, state.nsColor] : [state.nsColor]
+            let shield = NSImage(systemSymbolName: state.symbol, accessibilityDescription: state.title)?
+                .withSymbolConfiguration(.init(paletteColors: colors))
+            pulse?.draw(in: NSRect(x: 0, y: 1, width: 16, height: 16))
+            shield?.draw(in: NSRect(x: 19, y: 1, width: 15, height: 16))
+            return true
+        }
         icon.isTemplate = false
-        return Image(nsImage: icon).renderingMode(.original)
-            .help(store.state.title).accessibilityLabel(store.state.title)
+        icon.accessibilityDescription = state.title
+        return icon
     }
 }
 
@@ -95,7 +101,11 @@ struct VPNPreferencesView: View {
                 }
                 Picker("Server", selection: Binding(get: { subscription.selectedID }, set: { store.select($0) })) {
                     ForEach(subscription.nodes) { node in Text("\(node.name) · \(node.kind.uppercased())").tag(node.id) }
-                }.disabled(store.requested || store.busy)
+                }.disabled(store.busy || (store.requested && store.state != .connected))
+                if store.requested {
+                    Text("Changing server keeps the VPN policy enabled and reconnects the tunnel engine. Existing connections may briefly pause.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Button("Refresh subscription") { store.importSubscription(subscription.sourceURL) }
                     .disabled(store.requested || store.busy || !store.engineAvailable)
             }
@@ -121,9 +131,39 @@ struct VPNPreferencesView: View {
                 Text(issue).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
+            VPNDiagnosticsView(store: store)
             Text(store.engineAvailable
-                 ? "Subscriptions and server credentials stay in Keychain. Disable protection explicitly before changing the server. Installing the network component requires a provisioned, signed VPN build."
+                 ? "Subscriptions and server credentials stay in Keychain. Installing the network component requires a provisioned, signed VPN build."
                  : "This monitoring-only build does not contain the VPN engine. The VPN build is separate and requires macOS network-extension approval.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct VPNDiagnosticsView: View {
+    @ObservedObject var store: VPNStore
+
+    var body: some View {
+        if let traffic = store.traffic {
+            Text("\(traffic.title) · KiB/s / MiB/s · VPN interface traffic")
+                .font(.caption).monospacedDigit()
+        }
+        HStack {
+            Button("Test DNS / HTTPS latency") { store.checkNetwork() }.disabled(store.checkingNetwork)
+            if store.checkingNetwork { ProgressView().controlSize(.small) }
+        }
+        if let report = store.networkReport {
+            ForEach(report.results) { result in
+                HStack {
+                    Image(systemName: result.passed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(result.passed ? Color.green : Color.orange)
+                    Text(result.id)
+                    Spacer()
+                    Text(result.passed ? "\(result.milliseconds) ms" : "Failed · \(result.milliseconds) ms")
+                    if let status = result.status { Text("HTTP \(status)") }
+                }.font(.caption)
+            }
+            Text("Measured \(report.time.formatted(date: .omitted, time: .standard)). HTTPS timing includes DNS, TCP and TLS; this is not ICMP ping or a leak test.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

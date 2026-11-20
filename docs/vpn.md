@@ -2,6 +2,8 @@
 
 **Status: system-extension activation, subscription import and the credential-storage probe have been checked on one Mac. Connection and crash/leak checks remain outstanding.** A successful compile, signature or green unit test is not a protection guarantee.
 
+The requested persistent network lock, which must remain when the VPN is stopped, is not implemented by this candidate. Its contract and outstanding enforcement work are tracked in [network-lock.md](network-lock.md). Do not treat Disable protection or a final disconnected state as locked networking.
+
 The candidate uses pinned XTLS/libXray v26.11.9 inside a macOS packet-tunnel system extension. The menu process is separate: quitting it does not deliberately stop an enabled VPN. No Happ process, private profile or subscription database is read.
 
 ## Implemented paths
@@ -14,7 +16,9 @@ The candidate uses pinned XTLS/libXray v26.11.9 inside a macOS packet-tunnel sys
 - Provider health through `NETunnelProviderSession`, checked against the selected node and saved policy. Missing, contradictory or stale evidence never turns the shield green.
 - A stopped core triggers reassertion and retry with backoff. Wake/default-path changes request a core restart. Failures do not turn off the saved protection request or delete the VPN policy.
 - The menu app resolves server addresses with an eight-second deadline before saving/enabling a VPN policy. Failure leaves network settings unchanged; a late DNS result cannot continue setup. The provider validates and uses the saved numeric addresses, with no startup DNS query after `includeAllNetworks` takes effect. Recovery and On Demand reuse these addresses. Server DNS changes require explicitly disabling and enabling protection again in this candidate.
-- **Disable protection** is explicit and disables the saved On Demand policy before stopping the connection. Changing subscription/server is disabled while protection is requested in this first candidate.
+- **Disable protection** is explicit and disables the saved On Demand policy before stopping the connection. Subscription replacement stays disabled while protection is requested. Version 0.3.6 adds a server selector while connected: it prepares the new endpoint, saves its policy and asks the running provider to replace the proxy engine while retaining protection intent. Existing connections can pause or fail; seamless switching and leak behavior require on-device testing. Credentials have separate per-node Keychain accounts, so preparing a new node does not overwrite the active node's referenced credentials.
+
+Version 0.3.6 also adds a single composite menu icon (pulse plus colored status shield), passive interface receive/send rates, and explicit DNS/HTTPS latency checks. Rates are measured from the provider-reported utun interface's byte counters and shown in KiB/s or MiB/s; they are current traffic, not available bandwidth. Checks contact Apple/GitHub via the current connection using unauthenticated HEAD requests, with ephemeral sessions and no redirects. Their elapsed time is not ICMP ping, a throughput benchmark or evidence of leak protection. Tests do not run automatically. The green shield still describes OS/provider state, not guaranteed Internet reachability.
 
 Colors: grey = off/unavailable; amber = connecting; green = OS policy and provider report active; red lock = reasserting with a stopped core; red warning = protection unverified. “VPN active” describes current evidence, not an external connectivity/IP test.
 
