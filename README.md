@@ -65,7 +65,7 @@ VibeMonitoring reads local JSONL journals under `~/.codex/sessions`, or the conf
 
 **These are observed journal states, not a process-liveness guarantee.** A crash may leave an unfinished turn behind; long model calls may also stop producing events temporarily. Neither case is automatically declared a failed agent. Not all Codex versions persist approval events, so missing activity is never guessed to mean “waiting for permission.” Cloud-only sessions that do not have local journals are not covered.
 
-The reader examines the 40 most recently modified journal files. On first read it loads at most a 1 MiB metadata prefix and a 2 MiB tail per file, then reads only appended bytes. It handles incomplete lines, truncation and replacement, skips symlinked journals, and bounds individual records. Unknown record types are ignored. Historical turns outside the available tail are not reconstructed.
+The reader examines the 40 most recently modified journal files. On first read it loads a metadata prefix and a 2 MiB activity/token tail. It also searches backward in 64 KiB blocks to recover the latest turn's lifecycle, which may start much earlier in a long journal. Subsequent refreshes read only appended bytes; large gaps trigger recovery again. It handles incomplete lines, truncation and replacement, skips symlinked journals, and bounds individual records. Unknown record types are ignored. Earlier turns outside the available tail are not reconstructed.
 
 Codex's journal format is an internal format and can change. The parser supports the `session_meta`, `turn_context`, `event_msg` and `token_usage_record` structures observed in Codex 0.160–0.169 journals. Parser tests use synthetic examples, not exported user sessions.
 

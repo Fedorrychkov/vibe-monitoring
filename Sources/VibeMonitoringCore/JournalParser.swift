@@ -9,6 +9,16 @@ public struct JournalParser {
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     }
 
+    func turnEventType(in line: Data) -> String? {
+        guard let record = try? decoder.decode(Record.self, from: line), record.type == "event_msg" else { return nil }
+        switch record.payload.type {
+        case "task_started", "task_complete", "turn_aborted", "exec_approval_request",
+             "apply_patch_approval_request", "request_user_input", "error":
+            return record.payload.type
+        default: return nil
+        }
+    }
+
     public func apply(_ line: Data, to session: inout CodexSession) {
         guard let record = try? decoder.decode(Record.self, from: line) else { return }
         let payload = record.payload

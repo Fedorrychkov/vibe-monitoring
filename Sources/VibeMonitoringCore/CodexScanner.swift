@@ -92,6 +92,12 @@ public actor CodexScanner {
                 parser.apply(Data(header[..<newline]), to: &session)
             }
             let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+            if start > 0 {
+                // A long active turn can begin well before the token/activity tail.
+                for event in try latestTurnEvents(in: handle, size: size) {
+                    parser.apply(event, to: &session)
+                }
+            }
             try handle.seek(toOffset: start)
             cursor = Cursor(session: session, offset: start, modified: modified, inode: inode,
                             framer: LineFramer())
@@ -113,5 +119,15 @@ public actor CodexScanner {
         cursor.offset = try handle.offset()
         cursor.modified = modified
         cursors[url] = cursor
+    }
+
+    private func latestTurnEvents(in handle: FileHandle, size: UInt64) throws -> [Data] {
+        var events: [Data] = []
+        try ReverseJournalReader.read(in: handle, before: size) { line in
+            guard let type = parser.turnEventType(in: line) else { return true }
+            events.append(line)
+            return type != "task_started"
+        }
+        return events.reversed()
     }
 }

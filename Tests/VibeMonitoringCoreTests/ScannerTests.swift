@@ -64,6 +64,42 @@ final class ScannerTests: XCTestCase {
         XCTAssertEqual(snapshot.sessions.first?.phase, .completed)
     }
 
+    func testLongActiveTurnIsRecoveredOutsideTailAndAfterLargeAppend() async throws {
+        var data = try record("session_meta", ["id": "sample", "cwd": "/demo/project"])
+        data.append(try record("event_msg", ["type": "task_started", "turn_id": "first"]))
+        data.append(try record("response_item", ["ignored": String(repeating: "x", count: 150_000)]))
+        data.append(try record("event_msg", ["type": "token_count", "info": ["total_token_usage": ["total_tokens": 42]]]))
+        try data.write(to: journal)
+        let scanner = CodexScanner(tailBytes: 1024)
+        let initial = await scanner.scan(home: directory)
+        XCTAssertEqual(initial.sessions.first?.phase, .running)
+        XCTAssertEqual(initial.sessions.first?.activeTurnID, "first")
+        XCTAssertEqual(initial.sessions.first?.usage?.total, 42)
+
+        let handle = try FileHandle(forWritingTo: journal)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: record("event_msg", ["type": "task_complete", "turn_id": "first"]))
+        try handle.write(contentsOf: record("event_msg", ["type": "task_started", "turn_id": "second"]))
+        try handle.write(contentsOf: record("response_item", ["ignored": String(repeating: "x", count: 150_000)]))
+        try handle.write(contentsOf: record("event_msg", ["type": "token_count"]))
+        try handle.close()
+        let next = await scanner.scan(home: directory)
+        XCTAssertEqual(next.sessions.first?.phase, .running)
+        XCTAssertEqual(next.sessions.first?.activeTurnID, "second")
+    }
+
+    func testReverseReaderHandlesBoundariesOversizedAndUnfinishedLines() throws {
+        try Data("first\nsecond\n\(String(repeating: "x", count: 100))\nthird\nunfinished".utf8).write(to: journal)
+        let handle = try FileHandle(forReadingFrom: journal)
+        defer { try? handle.close() }
+        var lines: [String] = []
+        try ReverseJournalReader.read(in: handle, before: handle.seekToEnd(), blockBytes: 7, maximumLineBytes: 10) {
+            lines.append(String(decoding: $0, as: UTF8.self))
+            return true
+        }
+        XCTAssertEqual(lines, ["third", "second", "first"])
+    }
+
     func testSymlinkedJournalsAreNotRead() async throws {
         let outside = directory.appendingPathComponent("outside.jsonl")
         try record("session_meta", ["id": "outside"]).write(to: outside)
