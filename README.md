@@ -6,7 +6,7 @@ A native macOS menu bar app for observing local Codex sessions. See recent activ
 
 ![VibeMonitoring components rendered with fictional demo data](docs/demo-preview.png)
 
-The first release is a **read-only Codex monitor**. VPN protection, subscription imports, Quickping integration and additional agents are planned, not implemented. This version does not block direct network connections or protect against VPN failures.
+VibeMonitoring observes Codex locally and can connect to Quickping for read-only service monitoring. The Quickping server needs the desktop integration endpoints described in [the integration contract](docs/quickping-integration.md). VPN protection, subscription imports and additional agents are planned, not implemented. This version does not block direct network connections or protect against VPN failures.
 
 ## What works
 
@@ -18,8 +18,10 @@ The first release is a **read-only Codex monitor**. VPN protection, subscription
 - Optional notifications when a turn observed as active finishes.
 - Custom Codex home directory, refresh controls and a separate dashboard window.
 - A demo mode using fictional data for screenshots and development.
+- Optional Quickping sign-in through the system browser, with PKCE, explicit read-only consent and credentials in macOS Keychain.
+- Quickping service status, last check results, latency and open incident counts. Failed requests preserve previous results and mark them stale.
 
-No account, API key, server or third-party Swift package is required.
+Codex monitoring requires no account, API key or server. Quickping is optional. No third-party Swift package is required.
 
 ## Run
 
@@ -79,16 +81,17 @@ Dollar costs are intentionally not inferred from a model name or subscription pl
 
 ## Privacy
 
-- All monitoring runs locally. The app makes no network requests.
+- Codex monitoring runs locally. No requests are made until Quickping is explicitly connected; saved Quickping connections resume polling every 30 seconds on launch.
+- Quickping authorization and monitoring contact only the selected server. API redirects are rejected, browser cookies are not copied into API requests, and the read-only token is stored in macOS Keychain. Disconnect removes local access and attempts server revocation; if offline, the app explains how to revoke it on the website.
 - No telemetry, analytics or crash-upload SDK.
 - `auth.json`, API keys and subscription links are not read.
 - Conversation text, command arguments and tool outputs are not displayed, persisted or uploaded. The JSONL files themselves contain these fields; the parser extracts only the metadata it needs.
-- Preferences store the selected Codex directory and the notification toggle in macOS UserDefaults.
+- Preferences store the selected Codex directory, notification toggle and non-secret Quickping server origin in macOS UserDefaults.
 - Project folder names appear locally in the UI and, if enabled, finish notifications. Use `--demo` for public screenshots.
 
 ## Next modules
 
-1. **Quickping:** read existing service status boards, incidents and latency. Network unavailable must show stale data, not mark every remote service down.
+1. **Quickping:** finish a live browser sign-in check against a deployed server; add per-service incident history later. Current integration covers the account's first 100 active services, with explicit truncation and unknown status for overdue server checks.
 2. **Network protection:** a separately authorized system component, with protected/blocked/unprotected states. Protection must survive GUI and VPN-client crashes. Disabling protection must be an explicit user action.
 3. **Connections:** supported subscription formats and VPN-core integration; no assumption that another app's private configuration is an import API.
 4. **Other agents:** provider-specific event adapters. Claude Code is a candidate for hooks/OpenTelemetry; unknown processes must not be given invented progress or cost data.

@@ -40,7 +40,7 @@ struct DashboardView: View {
                     Text("Your agents. One glance.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(store.isDemo ? "DEMO" : "LOCAL")
+                Text(store.isDemo ? "DEMO" : "MAC")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .padding(.horizontal, 8).padding(.vertical, 5)
                     .background(.secondary.opacity(0.10), in: Capsule())
@@ -52,12 +52,6 @@ struct DashboardView: View {
                 MetricCard(value: "\(store.snapshot.sessions.count)", title: "Recent sessions", symbol: "square.stack.3d.up", color: .teal)
             }.padding(.horizontal, 20)
 
-            HStack {
-                Label("Codex", systemImage: "terminal").font(.headline)
-                Spacer()
-                Toggle("Show finished", isOn: $store.showFinished).toggleStyle(.checkbox).font(.caption)
-            }.padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 10)
-
             if let issue = store.snapshot.issue {
                 Label(issue, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
@@ -68,6 +62,12 @@ struct DashboardView: View {
 
             ScrollView {
                 LazyVStack(spacing: 10) {
+                    QuickpingView(store: store.quickping)
+                    HStack {
+                        Label("Codex", systemImage: "terminal").font(.headline)
+                        Spacer()
+                        Toggle("Show finished", isOn: $store.showFinished).toggleStyle(.checkbox).font(.caption)
+                    }.padding(.top, 10)
                     if store.visibleSessions.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "terminal").font(.largeTitle).foregroundStyle(.secondary)
@@ -80,7 +80,7 @@ struct DashboardView: View {
                         SessionCard(session: session, initiallyExpanded: store.isDemo && session.displayPhase() == .running)
                     }
                 }.padding(.horizontal, 20).padding(.bottom, 16)
-            }
+            }.padding(.top, 16)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Activity comes from local Codex journals. A quiet or crashed process may leave a stale signal.")
@@ -88,9 +88,9 @@ struct DashboardView: View {
                 HStack {
                     Label("Read only", systemImage: "lock.shield").font(.caption2).foregroundStyle(.secondary)
                     Spacer()
-                    Button { Task { await store.refresh() } } label: {
+                    Button { Task { await store.refresh(); await store.quickping.refresh() } } label: {
                         Image(systemName: "arrow.clockwise")
-                    }.help("Refresh local journals").disabled(store.isRefreshing)
+                    }.help("Refresh journals and Quickping").disabled(store.isRefreshing)
                     if popover {
                         Button { NSApp.activate(ignoringOtherApps: true); openWindow(id: "dashboard") } label: {
                             Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -105,6 +105,7 @@ struct DashboardView: View {
         }
         .frame(minWidth: 420, idealWidth: 440, maxWidth: .infinity)
         .frame(height: popover ? 650 : nil)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
@@ -256,7 +257,8 @@ enum DemoPreview {
             ForEach(snapshot.sessions) { session in
                 SessionCard(session: session, initiallyExpanded: session.displayPhase() == .running)
             }
-            Label("Local · Read only · No account required", systemImage: "lock.shield")
+            QuickpingView(store: QuickpingStore(demo: true))
+            Label("Codex local · Quickping optional · Demo data", systemImage: "lock.shield")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(22).frame(width: 460)

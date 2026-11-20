@@ -27,11 +27,12 @@ struct PreferencesView: View {
                 if let issue = store.notificationIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
             }
             Section("Privacy") {
-                Text("No accounts or API keys are required. VibeMonitoring makes no network requests, does not change Codex settings, and does not store or upload conversation content.")
+                Text("Codex monitoring is local and requires no account. If you connect Quickping, the app contacts only your chosen server for authorization and read-only monitoring. Codex journals and conversation content are never uploaded.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            QuickpingPreferencesView(store: store.quickping)
         }
-        .formStyle(.grouped).padding(12).frame(width: 530, height: 380)
+        .formStyle(.grouped).padding(12).frame(width: 570, height: 610)
         .onAppear { path = store.codexHome }
         .fileImporter(isPresented: $choosingDirectory, allowedContentTypes: [.folder]) { result in
             if case let .success(url) = result { path = url.path; store.applyHome(path) }

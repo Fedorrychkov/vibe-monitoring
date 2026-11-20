@@ -1,6 +1,14 @@
 import Foundation
 
 public enum DemoData {
+    public static func quickpingSnapshot(at now: Date = Date()) -> QuickpingSnapshot {
+        QuickpingSnapshot(sampledAt: now.addingTimeInterval(-12), services: [
+            QuickpingService(id: "demo-api", name: "Orbit API", status: "operational", lastCheckedAt: now.addingTimeInterval(-20), latencyMs: 142, openIncidents: []),
+            QuickpingService(id: "demo-assets", name: "Asset service", status: "degraded", lastCheckedAt: now.addingTimeInterval(-18), latencyMs: 1_900,
+                             openIncidents: [QuickpingIncident(id: "demo-slow", reason: "slow", openedAt: now.addingTimeInterval(-600))]),
+        ], truncated: false)
+    }
+
     public static func snapshot(at now: Date = Date()) -> ScanSnapshot {
         var active = CodexSession(id: "demo-active")
         active.projectPath = "/demo/projects/orbit-api"
