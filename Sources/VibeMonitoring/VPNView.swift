@@ -122,7 +122,7 @@ private struct VPNQuickControls: View {
             }.disabled(store.busy || store.networkLock.busy)
             Button("Allow direct Internet…") {
                 VPNActionConfirmation.perform("Allow direct Internet", direct: true, activeTurns: activeTurns) { store.allowDirect() }
-            }.disabled(store.busy || store.networkLock.busy || !store.networkLock.installed)
+            }.disabled(store.busy || store.networkLock.busy || !store.networkLock.ready)
             Button("Open macOS network settings…") {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension")!)
             }.buttonStyle(.borderless).font(.caption)

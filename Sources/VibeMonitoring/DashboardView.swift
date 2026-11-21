@@ -106,7 +106,7 @@ struct DashboardView: View {
                             VPNActionConfirmation.perform("Quit and allow direct Internet", direct: true, activeTurns: store.snapshot.activeCount()) {
                                 store.vpn.allowDirect(quit: true)
                             }
-                        }.disabled(store.vpn.busy || !store.vpn.networkLock.installed)
+                        }.disabled(store.vpn.busy || !store.vpn.networkLock.ready)
                     } label: { Image(systemName: "power") }.menuStyle(.borderlessButton).fixedSize().help("Quit and network access options")
                 }.buttonStyle(.borderless)
             }.padding(.horizontal, 20).padding(.vertical, 12).background(.secondary.opacity(0.04))

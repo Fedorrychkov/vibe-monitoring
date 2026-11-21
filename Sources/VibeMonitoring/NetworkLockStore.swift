@@ -59,7 +59,8 @@ final class NetworkLockStore: NSObject, ObservableObject, OSSystemExtensionReque
     }
 
     func apply(_ value: NetworkLockPolicy) async throws {
-        guard !demo, ready, installed, !busy else { throw VPNError.signingRequired }
+        // Recovery must also work with an older or unresponsive installed filter; enabling still requires the matching build.
+        guard !demo, ready, (value.mode == .directAllowed || installed), !busy else { throw VPNError.signingRequired }
         busy = true; issue = nil
         filterDisabledConfirmed = false
         defer { busy = false }

@@ -2,7 +2,7 @@
 
 This pre-release changes explicit network recovery after a failed VPN connection and handoff to Happ or another VPN.
 
-- **Allow direct Internet** disables legacy auto-start, stops and removes only VibeMonitoring's VPN profile, then disables its packet filter and verifies the saved OS configuration. Your subscription stays in Keychain. The action no longer requires a responsive filter-status IPC channel to disable that filter.
+- **Allow direct Internet** disables legacy auto-start, stops and removes only VibeMonitoring's VPN profile, then disables its packet filter and verifies the saved OS configuration. Your subscription stays in Keychain. The action no longer requires a responsive filter-status IPC channel or an already-updated filter build to disable that filter.
 - New VPN connections do not install OS On Demand rules, preventing our tunnel from repeatedly replacing Happ. If the whole VPN provider stops, the independent lock remains enabled and you reconnect with **Retry VPN + lock**. Core recovery within a running provider remains automatic.
 - Locked pause still acknowledges the deny policy before stopping the VPN. An unsuccessful recovery remains unverified. Provider-health failures no longer imply that Internet blocking was independently verified.
 - Protection controls include handoff instructions, passive traffic rates, manual TCP/DNS/HTTPS checks and external IP/service-check links. Unsupported subscription transports remain omitted.

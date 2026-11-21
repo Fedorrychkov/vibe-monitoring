@@ -73,7 +73,7 @@ The read-only diagnostic reports `preservedLockPolicyReloads`, a process-lifetim
 
 ## Explicit recovery and coexistence (0.3.10)
 
-- **Allow direct Internet**: disable legacy On Demand; stop/remove our VPN profile; disable our filter and read back the saved disabled policy. This can recover even when our filter's status IPC is unavailable. No automatic unlock is triggered by a timeout, app exit, another VPN starting, or tunnel crash.
+- **Allow direct Internet**: disable legacy On Demand; stop/remove our VPN profile; disable our filter and read back the saved disabled policy. This path also works with an older installed filter build and does not require its status IPC to reply. Enabling protection still requires matching components. No automatic unlock is triggered by a timeout, app exit, another VPN starting, or tunnel crash.
 - **Pause**: acknowledge a deny policy, then disable/stop our tunnel, retaining its cached endpoint configuration.
 - **Connect/Retry**: explicitly enable our independent filter and tunnel. Do not install OS On Demand rules: automatic restarting of our whole tunnel would supersede Happ. The provider's existing core watchdog continues recovering a stopped core while that provider is alive. Whole-provider crashes leave the lock requested and require explicit Retry.
 - The UI confirms saved OS removal/disablement; this is not a claim that every existing socket was repaired. An unavailable or failed acknowledgement remains unverified.
