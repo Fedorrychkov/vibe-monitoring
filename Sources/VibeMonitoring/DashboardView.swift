@@ -62,7 +62,7 @@ struct DashboardView: View {
 
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    VPNView(store: store.vpn)
+                    VPNView(store: store.vpn, activeTurns: store.snapshot.activeCount())
                     QuickpingView(store: store.quickping)
                     HStack {
                         Label("Codex", systemImage: "terminal").font(.headline)
@@ -100,7 +100,14 @@ struct DashboardView: View {
                     Button { NSApp.activate(ignoringOtherApps: true); openWindow(id: "preferences") } label: {
                         Image(systemName: "gearshape")
                     }.help("Settings")
-                    Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }.help("Quit menu app; an active VPN keeps running")
+                    Menu {
+                        Button("Quit · keep current network mode") { NSApp.terminate(nil) }
+                        Button("Quit and allow direct Internet…") {
+                            VPNActionConfirmation.perform("Quit and allow direct Internet", direct: true, activeTurns: store.snapshot.activeCount()) {
+                                store.vpn.allowDirect(quit: true)
+                            }
+                        }.disabled(store.vpn.busy || !store.vpn.networkLock.installed)
+                    } label: { Image(systemName: "power") }.menuStyle(.borderlessButton).fixedSize().help("Quit and network access options")
                 }.buttonStyle(.borderless)
             }.padding(.horizontal, 20).padding(.vertical, 12).background(.secondary.opacity(0.04))
         }

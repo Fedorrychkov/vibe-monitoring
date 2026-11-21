@@ -9,6 +9,21 @@ struct VibeMonitoringApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--vpn-diagnostics") {
+            let checkNetwork = CommandLine.arguments.contains("--network-check")
+            DispatchQueue.global().asyncAfter(deadline: .now() + (checkNetwork ? 20 : 10)) {
+                fputs("Read-only diagnostics timed out.\n", stderr); exit(1)
+            }
+            Task {
+                do {
+                    let data = try await VPNReadOnlyDiagnostics.collect(checkNetwork: checkNetwork)
+                    print(String(decoding: data, as: UTF8.self)); exit(0)
+                } catch {
+                    fputs("Read-only diagnostics unavailable (code \((error as NSError).code)).\n", stderr); exit(1)
+                }
+            }
+            dispatchMain()
+        }
         if CommandLine.arguments.contains("--check-vpn-storage") {
             Task {
                 do {
@@ -42,7 +57,7 @@ struct VibeMonitoringApp: App {
             DashboardView(store: store, popover: true)
         } label: {
             Image(nsImage: VPNMenuIcon.make(vpn.state)).renderingMode(.original)
-                .accessibilityLabel(vpn.state.title).help(vpn.state.title)
+                .accessibilityLabel(vpn.statusTitle).help(vpn.statusTitle)
             Text([vpn.traffic?.title, store.snapshot.activeCount() > 0 ? "\(store.snapshot.activeCount())" : nil]
                 .compactMap { $0 }.joined(separator: " · ")).monospacedDigit()
         }

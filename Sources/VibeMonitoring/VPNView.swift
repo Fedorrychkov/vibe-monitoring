@@ -55,27 +55,35 @@ enum VPNMenuIcon {
 struct VPNView: View {
     @ObservedObject var store: VPNStore
     var showsSettings = true
+    var activeTurns = 0
+    @AppStorage("protectionExpanded") private var expanded = false
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: store.state.symbol).foregroundStyle(Color(nsColor: store.state.nsColor))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(store.state.title).font(.system(size: 12, weight: .semibold))
-                if let node = store.subscription?.selected {
-                    Text(node.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                } else {
-                    Text("Import a subscription in Settings.").font(.caption2).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            Button { expanded.toggle() } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: store.state.symbol).foregroundStyle(Color(nsColor: store.state.nsColor))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(store.statusTitle).font(.system(size: 12, weight: .semibold))
+                        Text(store.subscription?.selected?.name ?? "Import a subscription in Settings.")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    if store.busy { ProgressView().controlSize(.small) }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down").foregroundStyle(.secondary)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("Protection details")
+            if expanded {
+                Divider()
+                VPNQuickControls(store: store, activeTurns: activeTurns)
+                VPNServerList(store: store, activeTurns: activeTurns)
+                VPNDiagnosticsView(store: store)
+                VPNCheckLinks()
+                if showsSettings {
+                    Button("Subscription settings…") { NSApp.activate(ignoringOtherApps: true); openWindow(id: "preferences") }
+                        .buttonStyle(.borderless).font(.caption)
                 }
-                if store.state == .unverified {
-                    Text("Do not assume traffic is protected.").font(.caption2).foregroundStyle(.red)
-                }
-            }
-            Spacer()
-            if store.busy { ProgressView().controlSize(.small) }
-            if showsSettings {
-                Button("VPN…") { NSApp.activate(ignoringOtherApps: true); openWindow(id: "preferences") }
-                    .buttonStyle(.borderless).font(.caption)
             }
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
@@ -84,27 +92,112 @@ struct VPNView: View {
     }
 }
 
+private struct VPNQuickControls: View {
+    @ObservedObject var store: VPNStore
+    var activeTurns: Int
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Testing build · network lock has not passed device crash, restart and leak checks.")
+                .font(.caption2).foregroundStyle(.orange)
+            if !store.installed {
+                Button("Install / update VPN component…") {
+                    VPNActionConfirmation.perform("Update VPN component", activeTurns: activeTurns) { store.install() }
+                }.disabled(store.busy || !store.engineAvailable)
+            }
+            if !store.networkLock.installed {
+                Button("Install / update network lock…") {
+                    VPNActionConfirmation.perform("Update network lock component", activeTurns: activeTurns) { store.networkLock.install() }
+                }
+                    .disabled(store.networkLock.busy || !store.networkLock.ready)
+            }
+            HStack {
+                if !store.requested || store.state == .blocked || store.state == .unverified {
+                    Button(store.requested ? "Retry VPN + lock" : "Connect VPN + lock") {
+                        VPNActionConfirmation.perform("Connect VPN + lock", activeTurns: activeTurns) { store.enable() }
+                    }.disabled(!store.installed || !store.networkLock.installed || store.subscription?.selected == nil)
+                }
+                Button("Pause · lock network") {
+                    VPNActionConfirmation.perform("Pause and lock network", activeTurns: activeTurns) { store.pause() }
+                }.disabled(!store.networkLock.installed || store.networkLock.locked)
+            }.disabled(store.busy || store.networkLock.busy)
+            Button("Allow direct Internet…") {
+                VPNActionConfirmation.perform("Allow direct Internet", direct: true, activeTurns: activeTurns) { store.allowDirect() }
+            }.disabled(store.busy || store.networkLock.busy || !store.networkLock.installed)
+            Button("Open macOS network settings…") {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension")!)
+            }.buttonStyle(.borderless).font(.caption)
+            Text(store.networkLock.confirmed && (store.networkLock.locked || store.state == .blocked)
+                 ? "Internet is blocked. Connect VPN to restore protected access, or explicitly allow direct Internet. Closing this window keeps the lock."
+                 : "Pausing VPN keeps the lock. If protection is not confirmed, Internet access is not verified. To use Happ or another VPN, first choose Allow direct Internet and wait for confirmation; this removes our VPN profile and disables our filter.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let issue = store.issue ?? store.networkLock.issue {
+                Text(issue).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+        }
+    }
+}
+
+private struct VPNServerList: View {
+    @ObservedObject var store: VPNStore
+    var activeTurns: Int
+    var body: some View {
+        if let subscription = store.subscription {
+            HStack {
+                Text("Servers").font(.caption.bold())
+                Spacer()
+                Button(store.probingServers ? "Measuring…" : "Measure TCP") { store.probeServers() }
+                    .buttonStyle(.borderless).font(.caption).disabled(store.probingServers || store.busy)
+            }
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(subscription.nodes) { node in
+                        Button {
+                            guard node.id != subscription.selectedID else { return }
+                            if store.requested {
+                                VPNActionConfirmation.perform("Switch VPN server", activeTurns: activeTurns) { store.select(node.id) }
+                            } else { store.select(node.id) }
+                        } label: {
+                            HStack {
+                                Image(systemName: subscription.selectedID == node.id ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(subscription.selectedID == node.id ? Color.accentColor : .secondary)
+                                Text(node.name).lineLimit(1)
+                                Spacer()
+                                if let result = store.serverResults[node.id] {
+                                    Text(result.reachable ? "TCP \(result.milliseconds) ms" : "TCP failed").foregroundStyle(result.reachable ? Color.secondary : .orange)
+                                } else { Text("—").foregroundStyle(.secondary) }
+                            }.font(.caption).padding(.vertical, 5).contentShape(Rectangle())
+                        }.buttonStyle(.plain).disabled(store.busy || store.networkLock.busy || (store.requested && store.state != .connected))
+                    }
+                }
+            }.frame(height: CGFloat(min(subscription.nodes.count, 5)) * 30)
+            if let time = store.serverResultsAt {
+                Text("Measured \(time.formatted(date: .omitted, time: .standard)) via the connection used at that time.").font(.caption2).foregroundStyle(.secondary)
+            }
+            Text("TCP readiness via the current connection. A VPN can acknowledge locally before reaching the destination; this does not verify the remote server or proxy login. Switching can interrupt existing connections. Nodes can share an exit IP.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 struct VPNPreferencesView: View {
     @ObservedObject var store: VPNStore
+    var activeTurns = 0
     @State private var subscriptionURL = ""
 
     var body: some View {
-        Section("VPN") {
-            Label(store.state.title, systemImage: store.state.symbol).foregroundStyle(Color(nsColor: store.state.nsColor))
-            Text("Testing build: VPN protection has not yet passed the on-device leak and crash checks.")
-                .font(.caption).foregroundStyle(.orange)
+        Section("Protection") {
+            Label(store.statusTitle, systemImage: store.state.symbol).foregroundStyle(Color(nsColor: store.state.nsColor))
+            VPNQuickControls(store: store, activeTurns: activeTurns)
+            VPNServerList(store: store, activeTurns: activeTurns)
+            VPNDiagnosticsView(store: store)
+            VPNCheckLinks()
+        }
+        Section("VPN subscription") {
             if let subscription = store.subscription {
                 HStack {
                     Text("\(subscription.nodes.count) supported servers").font(.caption)
                     Spacer()
                     Text(URL(string: subscription.sourceURL)?.host ?? "Saved subscription").font(.caption).foregroundStyle(.secondary)
-                }
-                Picker("Server", selection: Binding(get: { subscription.selectedID }, set: { store.select($0) })) {
-                    ForEach(subscription.nodes) { node in Text("\(node.name) · \(node.kind.uppercased())").tag(node.id) }
-                }.disabled(store.busy || (store.requested && store.state != .connected))
-                if store.requested {
-                    Text("Changing server keeps the VPN policy enabled and reconnects the tunnel engine. Existing connections may briefly pause.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Button("Refresh subscription") { store.importSubscription(subscription.sourceURL) }
                     .disabled(store.requested || store.busy || !store.engineAvailable)
@@ -115,27 +208,23 @@ struct VPNPreferencesView: View {
                 store.importSubscription(subscriptionURL)
                 subscriptionURL = ""
             }.disabled(store.requested || store.busy || subscriptionURL.isEmpty || !store.engineAvailable)
-            HStack {
-                if !store.installed {
-                    Button("Install network component…") { store.install() }.disabled(store.busy || !store.engineAvailable)
-                }
-                if store.requested {
-                    Button("Disable protection · allow direct internet") { store.disable() }.disabled(store.busy)
-                } else {
-                    Button("Enable protection for testing") { store.enable() }
-                        .disabled(store.busy || !store.installed || store.subscription?.selected == nil)
-                }
-                if store.busy { ProgressView().controlSize(.small) }
-            }
-            if let issue = store.issue {
-                Text(issue).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-            VPNDiagnosticsView(store: store)
-            Text(store.engineAvailable
-                 ? "Subscriptions and server credentials stay in Keychain. Installing the network component requires a provisioned, signed VPN build."
-                 : "This monitoring-only build does not contain the VPN engine. The VPN build is separate and requires macOS network-extension approval.")
+            Text("Subscriptions and credentials stay in Keychain. Refresh and import use the current network; a paused network lock blocks these requests.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct VPNCheckLinks: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Open external checks").font(.caption.bold())
+            HStack {
+                Link("Claude · CleanIP", destination: URL(string: "https://cleanip.io/en-US/claude")!)
+                Link("Codex · CleanIP", destination: URL(string: "https://cleanip.io/en-US/codex")!)
+                Link("Claude · Coffee", destination: URL(string: "https://ip.net.coffee/claude/")!)
+            }.font(.caption)
+            Text("Third-party checks open in your browser and see its network address. Results do not guarantee absence of leaks or service restrictions.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -148,12 +237,19 @@ private struct VPNDiagnosticsView: View {
             Text("\(traffic.title) · KiB/s / MiB/s · VPN interface traffic")
                 .font(.caption).monospacedDigit()
         }
+        if let diagnostics = store.providerDiagnostics {
+            Text("Since provider start: engine starts \(diagnostics.coreStarts) · path changes \(diagnostics.pathChanges)"
+                 + (diagnostics.lastRestart.map { " · last restart: \($0.rawValue)" } ?? ""))
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
         HStack {
             Button("Test DNS / HTTPS latency") { store.checkNetwork() }.disabled(store.checkingNetwork)
             if store.checkingNetwork { ProgressView().controlSize(.small) }
         }
         if let report = store.networkReport {
+            Text(store.networkReportContext).font(.caption2).foregroundStyle(.secondary)
             ForEach(report.results) { result in
+                VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     Image(systemName: result.passed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                         .foregroundStyle(result.passed ? Color.green : Color.orange)
@@ -162,6 +258,8 @@ private struct VPNDiagnosticsView: View {
                     Text(result.passed ? "\(result.milliseconds) ms" : "Failed · \(result.milliseconds) ms")
                     if let status = result.status { Text("HTTP \(status)") }
                 }.font(.caption)
+                if let detail = result.detail { Text(detail).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                }
             }
             Text("Measured \(report.time.formatted(date: .omitted, time: .standard)). HTTPS timing includes DNS, TCP and TLS; this is not ICMP ping or a leak test.")
                 .font(.caption).foregroundStyle(.secondary)

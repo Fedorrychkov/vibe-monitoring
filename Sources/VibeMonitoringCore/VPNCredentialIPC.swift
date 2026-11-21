@@ -15,7 +15,7 @@ public struct VPNCredentialFailure: Error, LocalizedError, Equatable {
 }
 
 public enum VPNCredentialIdentity {
-    public enum Peer: String { case app = "dev.vibemonitoring.app", provider = "dev.vibemonitoring.app.tunnel" }
+    public enum Peer: String { case app = "dev.vibemonitoring.app", provider = "dev.vibemonitoring.app.tunnel", networkLock = "dev.vibemonitoring.app.lock" }
 
     public static func requirement(for peer: Peer, team: String) throws -> String {
         guard team.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil else {
@@ -24,13 +24,13 @@ public enum VPNCredentialIdentity {
         return "anchor apple generic and identifier \"\(peer.rawValue)\" and certificate leaf[subject.OU] = \"\(team)\""
     }
 
-    public static func serviceName(team: String, build: String?) throws -> String {
+    public static func serviceName(team: String, build: String?, peer: Peer = .provider) throws -> String {
         _ = try requirement(for: .provider, team: team)
         guard let build, build.range(of: "^[0-9]{1,10}$", options: .regularExpression) != nil else {
             throw VPNCredentialFailure(.validation, errSecParam)
         }
         // A stable name can remain bound to a removed extension after upgrades (Apple FB17032197).
-        return team + ".dev.vibemonitoring.app.tunnel." + build
+        return team + "." + peer.rawValue + "." + build
     }
 
     public static func ownTeam() throws -> String {

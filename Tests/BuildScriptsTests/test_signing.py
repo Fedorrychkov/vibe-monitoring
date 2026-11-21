@@ -1,6 +1,7 @@
 import copy
 import datetime
 import importlib.util
+import hashlib
 import plistlib
 from pathlib import Path
 import tempfile
@@ -58,6 +59,25 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(ent['com.apple.developer.networking.networkextension'], [signing.CAPABILITY])
         self.assertNotIn('keychain-access-groups', ent)
         self.assertNotIn('unrelated-capability', ent)
+
+    def test_profile_must_contain_the_exact_signing_certificate(self):
+        profile = self.profile()
+        cert = b'synthetic certificate'
+        profile['DeveloperCertificates'] = [cert]
+        signing.validate_profile(profile, 'dev.vibemonitoring.app', certificate_sha1=hashlib.sha1(cert).hexdigest())
+        with self.assertRaisesRegex(RuntimeError, 'selected signing certificate'):
+            signing.validate_profile(profile, 'dev.vibemonitoring.app', certificate_sha1='0' * 40)
+
+    def test_lock_profile_requires_exact_id_and_filter_capability(self):
+        profile = self.profile()
+        profile['Entitlements']['com.apple.application-identifier'] = 'ABCDE12345.dev.vibemonitoring.app.lock'
+        profile['Entitlements']['com.apple.developer.networking.networkextension'] = [signing.LOCK_CAPABILITY, signing.CAPABILITY]
+        _, ent = signing.validate_profile(profile, 'dev.vibemonitoring.app.lock', capabilities=[signing.LOCK_CAPABILITY])
+        self.assertEqual(ent['com.apple.developer.networking.networkextension'], [signing.LOCK_CAPABILITY])
+        with self.assertRaises(RuntimeError):
+            signing.validate_profile(self.profile(), 'dev.vibemonitoring.app.lock', capabilities=[signing.LOCK_CAPABILITY])
+        with self.assertRaises(RuntimeError):
+            signing.validate_profile(self.profile(), 'dev.vibemonitoring.app', capabilities=[signing.CAPABILITY, signing.LOCK_CAPABILITY])
 
     def test_expired_wrong_app_missing_capability_and_development_profiles_fail(self):
         for patch in [{'ExpirationDate': datetime.datetime(2000, 1, 1)}, {'ProvisionsAllDevices': False}]:

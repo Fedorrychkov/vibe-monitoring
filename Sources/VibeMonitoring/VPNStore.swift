@@ -1,9 +1,11 @@
+import Combine
 import AppKit
 import Foundation
 import NetworkExtension
 import SwiftUI
 import SystemExtensions
 import VibeMonitoringCore
+import os
 #if VIBE_VPN
 import VibeXray
 #endif
@@ -16,10 +18,17 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     @Published private(set) var busy = false
     @Published private(set) var installed = false
     @Published private(set) var requested = false
+    @Published private(set) var providerDiagnostics: VPNProviderDiagnostics?
     @Published private(set) var traffic: VPNTrafficRate?
     @Published private(set) var networkReport: VPNConnectivityReport?
+    @Published private(set) var networkReportContext = ""
     @Published private(set) var checkingNetwork = false
+    @Published private(set) var probingServers = false
+    @Published private(set) var serverResultsAt: Date?
+    @Published private(set) var serverResults: [String: VPNServerProbeResult] = [:]
     private var trafficSample: VPNTrafficSample?
+    let networkLock: NetworkLockStore
+    private var lockObservation: AnyCancellable?
     let demo: Bool
     private var polling: Task<Void, Never>?
     private var activation: OSSystemExtensionRequest?
@@ -37,13 +46,15 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
 
     init(demo: Bool) {
         self.demo = demo
+        networkLock = NetworkLockStore(demo: demo)
         signed = !demo && VPNInstallation.signingReady
         super.init()
+        lockObservation = networkLock.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         guard !demo else { state = .off; return }
         requested = UserDefaults.standard.bool(forKey: "vpnProtectionRequested")
         do { subscription = try VPNKeychain.loadSubscription() }
         catch { issue = "Saved subscription is unavailable. Unlock Keychain or import it again." }
-        state = requested ? .unverified : .off
+        state = requested || networkLock.wantsLock ? .unverified : .off
         if signed {
             let query = OSSystemExtensionRequest.propertiesRequest(forExtensionWithIdentifier: VPNInstallation.providerID, queue: .main)
             query.delegate = self
@@ -59,11 +70,36 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
 
     deinit { polling?.cancel() }
 
+    func probeServers() {
+        guard !demo, !probingServers, let nodes = subscription?.nodes else { return }
+        probingServers = true
+        Task {
+            defer { probingServers = false }
+            serverResults = [:]; serverResultsAt = nil
+            // Three concurrent handshakes at most, only on explicit request.
+            for offset in stride(from: 0, to: min(nodes.count, 200), by: 3) {
+                let batch = Array(nodes[offset..<min(offset + 3, nodes.count, 200)])
+                await withTaskGroup(of: (String, VPNServerProbeResult).self) { group in
+                    for node in batch { group.addTask { (node.id, await VPNServerProbe.measure(host: node.host, port: node.port)) } }
+                    for await (id, result) in group { serverResults[id] = result }
+                }
+            }
+            serverResultsAt = Date()
+        }
+    }
+
     func checkNetwork() {
         guard !demo, !checkingNetwork else { return }
         checkingNetwork = true
+        networkReport = nil
+        let selection = subscription?.selectedID
+        let initialState = state
+        let context = state == .connected ? "Our VPN · " + (subscription?.selected?.name ?? "selected server")
+            : "Current network · our VPN is not confirmed active; another VPN may carry this test"
         Task {
-            networkReport = await VPNConnectivityCheck.run()
+            let report = await VPNConnectivityCheck.run()
+            networkReportContext = context + (selection != subscription?.selectedID || initialState != state ? " · network mode changed during test; repeat" : " · at test start")
+            networkReport = report
             checkingNetwork = false
         }
     }
@@ -103,14 +139,26 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         issue = nil
         Task {
             defer { busy = false }
+            let previousPolicy = networkLock.policy
+            var policyChanged = false
             var committed = false
+            state = .connecting
             do {
                 guard let manager = try await loadManager(), policyValid(manager),
                       manager.connection.status == .connected,
                       let configuration = manager.protocolConfiguration as? NETunnelProviderProtocol,
                       let session = manager.connection as? NETunnelProviderSession else { throw VPNError.providerUnavailable }
+                guard networkLock.confirmed, previousPolicy?.mode == .protected,
+                      previousPolicy?.nodeID == next.selectedID else { throw VPNError.providerUnavailable }
                 let addresses = try await VPNEndpointResolver.resolve(node.host)
                 let reference = try await VPNCredentialClient.store(node)
+                let endpoints = try addresses.map { try NetworkLockEndpoint(ip: $0, port: node.port) }
+                let oldHealth = try JSONDecoder().decode(VPNProviderHealth.self, from: await Self.providerReply(session))
+                guard oldHealth.nodeID == next.selectedID, oldHealth.running, !oldHealth.reasserting,
+                      let interface = oldHealth.interfaceName else { throw VPNError.providerUnavailable }
+                policyChanged = true
+                try await networkLock.apply(.init(mode: .protected, endpoints: endpoints,
+                                                  tunnelInterface: interface, nodeID: node.id))
                 let change = try VPNServerChange(nodeID: node.id, reference: reference, addresses: addresses)
                 configuration.serverAddress = node.host
                 configuration.passwordReference = reference
@@ -126,10 +174,16 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 state = .connecting
                 let reply = try await Self.providerReply(session, message: JSONEncoder().encode(change), timeout: 10)
                 let health = try JSONDecoder().decode(VPNProviderHealth.self, from: reply)
-                guard health.nodeID == node.id else { throw VPNError.providerUnavailable }
+                guard health.nodeID == node.id, health.running, !health.reasserting,
+                      let name = health.interfaceName, let policy = networkLock.policy else { throw VPNError.providerUnavailable }
+                let filter = try await NetworkLockClient.status(binding: .init(nodeID: node.id, interface: name))
+                guard filter.confirms(policy), filter.tunnelInterface == name else { throw VPNError.providerUnavailable }
                 state = .connecting
             } catch {
-                if committed { state = .unverified }
+                if policyChanged, !committed, let previousPolicy, previousPolicy.mode == .protected {
+                    try? await networkLock.apply(previousPolicy)
+                }
+                state = .unverified
                 issue = "Server change was not confirmed. The protection request remains enabled."
             }
         }
@@ -152,7 +206,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
 
     func enable() {
         guard !demo, !busy else { return }
-        guard engineAvailable, signed, installed,
+        guard engineAvailable, signed, installed, networkLock.installed,
               let node = subscription?.selected else { issue = VPNError.signingRequired.localizedDescription; return }
         busy = true
         issue = nil
@@ -160,8 +214,19 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             defer { busy = false }
             do {
                 let manager = try await loadManager() ?? NETunnelProviderManager()
-                let addresses = try await VPNEndpointResolver.resolve(node.host)
+                let addresses: [String]
+                if networkLock.wantsLock {
+                    guard let saved = manager.protocolConfiguration as? NETunnelProviderProtocol,
+                          saved.providerConfiguration?["nodeID"] as? String == node.id,
+                          let cached = saved.providerConfiguration?["bootstrapAddresses"] as? [String] else {
+                        issue = "This server has no cached endpoint addresses. Allow direct Internet explicitly to resolve it, or reconnect the previous server."
+                        return
+                    }
+                    addresses = try VPNTunnelConfiguration.validatedAddresses(cached)
+                } else { addresses = try await VPNEndpointResolver.resolve(node.host) }
                 let reference = try await VPNCredentialClient.store(node)
+                let endpoints = try addresses.map { try NetworkLockEndpoint(ip: $0, port: node.port) }
+                try await networkLock.apply(.init(mode: .protected, endpoints: endpoints, nodeID: node.id))
                 let configuration = NETunnelProviderProtocol()
                 configuration.providerBundleIdentifier = VPNInstallation.providerID
                 configuration.serverAddress = node.host
@@ -176,10 +241,9 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 manager.protocolConfiguration = configuration
                 manager.localizedDescription = "VibeMonitoring"
                 manager.isEnabled = true
-                let rule = NEOnDemandRuleConnect()
-                rule.interfaceTypeMatch = .any
-                manager.onDemandRules = [rule]
-                manager.isOnDemandEnabled = true
+                // The independent lock handles a missing tunnel; On Demand would evict another VPN such as Happ.
+                manager.onDemandRules = []
+                manager.isOnDemandEnabled = false
                 requested = true
                 state = .connecting
                 UserDefaults.standard.set(true, forKey: "vpnProtectionRequested")
@@ -188,7 +252,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 guard policyValid(manager) else { throw VPNError.invalidConfiguration }
                 try manager.connection.startVPNTunnel()
             } catch {
-                state = requested ? .unverified : .off
+                state = .unverified
                 let detail = (error as? VPNCredentialFailure)?.localizedDescription
                     ?? (error as? VPNError)?.localizedDescription
                     ?? "VPN configuration or connection failed (code \((error as NSError).code))."
@@ -198,36 +262,80 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         }
     }
 
-    func disable() {
+    func pause() { setNetworkMode(.paused) }
+    func allowDirect(quit: Bool = false) { setNetworkMode(.directAllowed, quit: quit) }
+
+    private func setNetworkMode(_ mode: NetworkLockMode, quit: Bool = false) {
         guard !demo, !busy else { return }
-        busy = true
+        busy = true; issue = nil
         Task {
             defer { busy = false }
             do {
-                if let manager = try await loadManager() {
-                    manager.isOnDemandEnabled = false
-                    manager.isEnabled = false
-                    try await save(manager)
-                    try await reload(manager)
-                    guard !manager.isEnabled, !manager.isOnDemandEnabled else { throw VPNError.invalidConfiguration }
-                    manager.connection.stopVPNTunnel()
-                }
+                try await VPNNetworkTransition.perform(mode: mode,
+                    stopTunnel: { try await self.retireTunnel(remove: mode == .directAllowed) },
+                    applyLock: { try await self.networkLock.apply(.init(mode: $0)) })
                 requested = false
                 UserDefaults.standard.set(false, forKey: "vpnProtectionRequested")
-                state = .off
-                issue = nil
-            } catch { state = .unverified; issue = "Protection could not be disabled. Check the VPN configuration in macOS Settings." }
+                state = mode == .paused ? .blocked : .off
+                traffic = nil; trafficSample = nil
+                if quit { NSApp.terminate(nil) }
+            } catch {
+                state = .unverified
+                issue = networkLock.issue ?? "Network recovery was not confirmed. Retry Allow direct Internet, or open macOS VPN & Filters to disable only VibeMonitoring's VPN and Network Lock."
+            }
         }
+    }
+
+    private func retireTunnel(remove: Bool) async throws {
+        if let manager = try await loadManager() {
+            manager.isOnDemandEnabled = false
+            manager.onDemandRules = []
+            manager.isEnabled = false
+            try await save(manager)
+            try await reload(manager)
+            guard !manager.isEnabled, !manager.isOnDemandEnabled else { throw VPNError.invalidConfiguration }
+            manager.connection.stopVPNTunnel()
+            if remove {
+                // Retire includeAllNetworks routing and stale session IPC; subscription and credentials stay in Keychain.
+                try await withCheckedThrowingContinuation { (next: CheckedContinuation<Void, Error>) in
+                    manager.removeFromPreferences { error in
+                        if let error { next.resume(throwing: error) } else { next.resume() }
+                    }
+                }
+                guard try await loadManager() == nil else { throw VPNError.providerUnavailable }
+            }
+            for _ in 0..<40 {
+                if [.invalid, .disconnected].contains(manager.connection.status) { break }
+                try await Task.sleep(nanoseconds: 250_000_000)
+            }
+            guard [.invalid, .disconnected].contains(manager.connection.status) else {
+                throw VPNError.providerUnavailable
+            }
+        }
+        Logger(subsystem: "dev.vibemonitoring.app", category: "network-mode")
+            .notice("Own VPN retired; profile removed: \(remove, privacy: .public)")
+    }
+
+    var statusTitle: String {
+        if networkLock.locked && !requested { return "Network locked · VPN paused" }
+        if (networkLock.wantsLock || networkLock.policy != nil) && !networkLock.confirmed { return "Network lock not confirmed" }
+        if state == .blocked && networkLock.confirmed { return "Network locked · VPN not connected" }
+        if state == .off { return "Direct access allowed" }
+        return state.title
     }
 
     private func refresh() async {
         guard !busy, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
+        await networkLock.refresh()
         do {
-            guard let manager = try await loadManager() else { state = requested ? .unverified : .off; return }
+            guard let manager = try await loadManager() else {
+                traffic = nil; trafficSample = nil; providerDiagnostics = nil
+                state = networkLock.locked ? .blocked : (requested || networkLock.wantsLock ? .unverified : .off); return
+            }
             guard !busy else { return }
-            if manager.isEnabled && manager.isOnDemandEnabled && !requested {
+            if manager.isEnabled && !requested {
                 requested = true
                 UserDefaults.standard.set(true, forKey: "vpnProtectionRequested")
             }
@@ -238,7 +346,9 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 guard !busy else { return }
                 health = try JSONDecoder().decode(VPNProviderHealth.self, from: body)
             }
+            providerDiagnostics = health?.diagnostics
             guard manager.connection.status == status else {
+                traffic = nil; trafficSample = nil; providerDiagnostics = nil
                 state = requested ? .unverified : .off
                 return
             }
@@ -252,30 +362,36 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             state = VPNProtectionState.evaluate(requested: requested, policyValid: policyValid(manager), system: system,
                                                  health: health, healthAge: health == nil ? nil : 0,
                                                  expectedNodeID: subscription?.selectedID)
+            if networkLock.locked && !requested { state = .blocked }
+            else if networkLock.wantsLock || requested || networkLock.policy != nil {
+                if !networkLock.confirmed { state = .unverified }
+                else if requested, status == .disconnected, networkLock.policy?.nodeID == subscription?.selectedID { state = .blocked }
+                else if state == .connected,
+                        networkLock.policy?.nodeID != subscription?.selectedID || health?.interfaceName == nil
+                        || networkLock.health?.tunnelInterface != health?.interfaceName { state = .unverified }
+            }
             if state == .connected, let name = health?.interfaceName, let sample = VPNTrafficSample.read(name) {
                 traffic = VPNTrafficRate.between(trafficSample, sample)
                 trafficSample = sample
             } else { traffic = nil; trafficSample = nil }
-            if state == .connected { issue = nil }
+            if state == .connected && issue == VPNError.providerUnavailable.localizedDescription { issue = nil }
         } catch {
             guard !busy else { return }
-            state = requested ? .unverified : .off
-            traffic = nil; trafficSample = nil
+            state = networkLock.locked ? .blocked : (requested || networkLock.wantsLock ? .unverified : .off)
+            traffic = nil; trafficSample = nil; providerDiagnostics = nil
             if requested { issue = VPNError.providerUnavailable.localizedDescription }
         }
     }
 
     private func policyValid(_ manager: NETunnelProviderManager) -> Bool {
-        guard manager.isEnabled, manager.isOnDemandEnabled,
+        guard manager.isEnabled, !manager.isOnDemandEnabled,
               let configuration = manager.protocolConfiguration as? NETunnelProviderProtocol,
               configuration.providerBundleIdentifier == VPNInstallation.providerID,
               configuration.includeAllNetworks, configuration.enforceRoutes, !configuration.excludeLocalNetworks,
               !configuration.disconnectOnSleep, configuration.passwordReference != nil,
               let addresses = configuration.providerConfiguration?["bootstrapAddresses"] as? [String],
               (try? VPNTunnelConfiguration.validatedAddresses(addresses)) != nil,
-              let rules = manager.onDemandRules, rules.count == 1, let rule = rules.first as? NEOnDemandRuleConnect,
-              rule.interfaceTypeMatch == .any, rule.ssidMatch == nil, rule.dnsSearchDomainMatch == nil,
-              rule.dnsServerAddressMatch == nil, rule.probeURL == nil else { return false }
+              (manager.onDemandRules ?? []).isEmpty else { return false }
         if #available(macOS 13.3, *), configuration.excludeAPNs || configuration.excludeCellularServices { return false }
         if #available(macOS 14.4, *), configuration.excludeDeviceCommunication { return false }
         return true

@@ -9,7 +9,7 @@ struct PreferencesView: View {
 
     var body: some View {
         Form {
-            VPNPreferencesView(store: store.vpn)
+            VPNPreferencesView(store: store.vpn, activeTurns: store.snapshot.activeCount())
             Section("Codex") {
                 TextField("Codex home", text: $path).onSubmit { store.applyHome(path) }
                     .textFieldStyle(.roundedBorder)

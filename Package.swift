@@ -14,6 +14,7 @@ let package = Package(
         .executable(name: "vibe-monitoring-scan", targets: ["VibeMonitoringScan"]),
     ] + (vpn ? [
         .executable(name: "VibeTunnel", targets: ["VibeTunnel"]),
+        .executable(name: "VibeLock", targets: ["VibeLock"]),
         .executable(name: "vibe-vpn-check", targets: ["vibe-vpn-check"]),
     ] : []),
     targets: [
@@ -27,6 +28,7 @@ let package = Package(
         .target(name: "VibeXray", dependencies: ["LibXray", "VibeMonitoringCore"],
                 linkerSettings: [.linkedFramework("Security"), .linkedFramework("CoreFoundation"), .linkedLibrary("resolv")]),
         .executableTarget(name: "VibeTunnel", dependencies: ["VibeXray", "VibeMonitoringCore"]),
+        .executableTarget(name: "VibeLock", dependencies: ["VibeMonitoringCore"]),
         .executableTarget(name: "vibe-vpn-check", dependencies: ["VibeXray", "VibeMonitoringCore"], path: "Sources/VibeVPNCheck"),
     ] : [])
 )

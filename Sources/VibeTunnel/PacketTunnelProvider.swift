@@ -6,7 +6,7 @@ import VibeMonitoringCore
 import VibeXray
 
 @objc(VibePacketTunnelProvider)
-final class PacketTunnelProvider: NEPacketTunnelProvider {
+final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let work = DispatchQueue(label: "dev.vibemonitoring.tunnel-core")
     private var node: VPNNode?
     private var resolvedAddresses: [String] = []
@@ -15,11 +15,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var issue: String?
     private var interfaceName: String?
     private var watchdog: DispatchSourceTimer?
+    private var previousPath: NWPath?
+    private var diagnostics = VPNProviderDiagnostics()
     private var pathObservation: NSKeyValueObservation?
+    private var bindingInFlight = false
     private var retryDelay: Double = 1
     private var retryAt: Double = 0
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
+        Logger(subsystem: "dev.vibemonitoring.app.tunnel", category: "lifecycle").notice("Tunnel start requested")
         work.async { [self] in
             var stage = "configuration"
             do {
@@ -41,18 +45,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 let addresses = try VPNTunnelConfiguration.validatedAddresses(saved)
                 self.resolvedAddresses = addresses
-                let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: addresses[0])
-                settings.mtu = 1_400
-                let ipv4 = NEIPv4Settings(addresses: ["198.18.0.1"], subnetMasks: ["255.255.255.0"])
-                ipv4.includedRoutes = [NEIPv4Route.default()]
-                settings.ipv4Settings = ipv4
-                let ipv6 = NEIPv6Settings(addresses: ["fd74:7662:6500::1"], networkPrefixLengths: [64])
-                ipv6.includedRoutes = [NEIPv6Route.default()]
-                settings.ipv6Settings = ipv6
-                let dns = NEDNSSettings(servers: ["1.1.1.1", "2606:4700:4700::1111"])
-                dns.matchDomains = [""]
-                dns.matchDomainsNoSearch = true
-                settings.dnsSettings = dns
+                let settings = try VPNTunnelConfiguration.networkSettings(remoteAddress: addresses[0])
                 self.setTunnelNetworkSettings(settings) { error in
                     self.work.async {
                         if let error {
@@ -63,10 +56,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                             guard !self.stopping else { throw VPNError.providerUnavailable }
                             try self.startCore(node, addresses: addresses)
                             self.installWatchdog()
+                            self.previousPath = self.defaultPath
                             self.pathObservation = self.observe(\.defaultPath, options: [.new]) { [weak self] _, _ in
-                                self?.work.async { [weak self] in self?.requestRestart() }
+                                self?.work.async { [weak self] in self?.pathChanged() }
                             }
                             completionHandler(nil)
+                            Logger(subsystem: "dev.vibemonitoring.app.tunnel", category: "lifecycle").notice("Tunnel start completed")
                         } catch {
                             self.failStartup(stage: "core-startup", error: error, completionHandler: completionHandler)
                         }
@@ -91,9 +86,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         _ = try XrayCore.invoke("runXray", payload: ["xrayJson": json])
         guard try XrayCore.invoke("getXrayState")["running"] as? Bool == true else { throw VPNError.providerUnavailable }
         running = true
+        diagnostics.coreStarts += 1
         issue = nil
         retryDelay = 1
         reasserting = false
+        bindNetworkLock()
+    }
+
+    private func bindNetworkLock() {
+        guard !bindingInFlight, !stopping, let node, let interfaceName,
+              let binding = try? NetworkLockBinding(nodeID: node.id, interface: interfaceName) else { return }
+        bindingInFlight = true
+        Task {
+            let health = try? await NetworkLockClient.status(binding: binding)
+            work.async { [self] in
+                bindingInFlight = false
+                guard self.node?.id == binding.nodeID, !stopping else { return }
+                if health?.active != true || health?.tunnelInterface != binding.interface {
+                    issue = "network-lock-unconfirmed"
+                } else if issue == "network-lock-unconfirmed" { issue = nil }
+            }
+        }
     }
 
     private func installWatchdog() {
@@ -102,14 +115,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         timer.setEventHandler { [weak self] in
             guard let self, !self.stopping else { return }
             let alive = (try? XrayCore.invoke("getXrayState")["running"] as? Bool) == true
-            if !alive || self.reasserting { self.recoverIfDue() }
+            if !alive || self.reasserting {
+                if !alive && !self.reasserting { self.diagnostics.lastRestart = .coreStopped }
+                self.recoverIfDue()
+            }
+            if self.running { self.bindNetworkLock() }
         }
         watchdog = timer
         timer.resume()
     }
 
-    private func requestRestart() {
+    private func pathChanged() {
+        let path = defaultPath
+        if let path, let previousPath, previousPath.isEqual(to: path) { return }
+        if path == nil && previousPath == nil { return }
+        previousPath = path
+        diagnostics.pathChanges += 1
+        requestRestart(reason: .pathChanged)
+    }
+
+    private func requestRestart(reason: VPNProviderDiagnostics.RestartReason) {
         guard !stopping else { return }
+        diagnostics.lastRestart = reason
         running = false
         reasserting = true
         issue = "network-reconnecting"
@@ -137,6 +164,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+        Logger(subsystem: "dev.vibemonitoring.app.tunnel", category: "lifecycle")
+            .notice("Tunnel stop requested; reason \(reason.rawValue, privacy: .public)")
         work.async {
             self.stopping = true
             self.watchdog?.cancel()
@@ -148,7 +177,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    override func wake() { work.async { self.requestRestart() } }
+    override func wake() { work.async { self.requestRestart(reason: .wake) } }
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
         work.async {
@@ -161,6 +190,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     self.reasserting = true
                     self.running = false
                     self.issue = "server-switching"
+                    self.diagnostics.lastRestart = .serverSwitch
                     self.node = node
                     self.resolvedAddresses = change.addresses
                     self.retryAt = 0
@@ -170,6 +200,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             var health = VPNProviderHealth(nodeID: self.node?.id ?? "", running: self.running,
                                            reasserting: self.reasserting, issue: self.issue)
             health.interfaceName = self.interfaceName
+            health.diagnostics = self.diagnostics
             completionHandler?(try? JSONEncoder().encode(health))
         }
     }

@@ -33,5 +33,5 @@ xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose "$DMG"
-shasum -a 256 "$DMG" > "$DMG.sha256"
+(cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")") > "$DMG.sha256"
 printf '\nNotarized DMG: %s\nNot uploaded to GitHub or installed.\n' "$DMG"

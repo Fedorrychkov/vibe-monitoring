@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 import Security
 import Darwin
+import NetworkExtension
 @testable import VibeMonitoringCore
 
 final class VPNTests: XCTestCase {
@@ -65,6 +66,26 @@ final class VPNTests: XCTestCase {
         XCTAssertEqual((json["log"] as? [String: String])?["loglevel"], "none")
         XCTAssertThrowsError(try VPNTunnelConfiguration.build(node: node, descriptor: -1, addresses: ["192.0.2.10"]))
         XCTAssertThrowsError(try VPNTunnelConfiguration.build(node: node, descriptor: 9, addresses: ["not-an-address"]))
+    }
+
+    func testResolverTransportChangePreservesFullIPv4AndIPv6Capture() throws {
+        let settings = try VPNTunnelConfiguration.networkSettings(remoteAddress: "192.0.2.10")
+        let dns = try XCTUnwrap(settings.dnsSettings)
+        XCTAssertEqual(dns.servers, ["1.1.1.1", "1.0.0.1"])
+        XCTAssertEqual(dns.matchDomains, [""])
+        XCTAssertTrue(dns.matchDomainsNoSearch)
+        let v4 = try XCTUnwrap(settings.ipv4Settings)
+        let v6 = try XCTUnwrap(settings.ipv6Settings)
+        XCTAssertEqual(v4.includedRoutes?.count, 1)
+        XCTAssertEqual(v4.includedRoutes?.first?.destinationAddress, "0.0.0.0")
+        XCTAssertEqual(v4.includedRoutes?.first?.destinationSubnetMask, "0.0.0.0")
+        XCTAssertEqual(v6.includedRoutes?.count, 1)
+        XCTAssertEqual(v6.includedRoutes?.first?.destinationAddress, "::")
+        XCTAssertEqual(v6.includedRoutes?.first?.destinationNetworkPrefixLength, 0)
+        XCTAssertTrue(v4.excludedRoutes?.isEmpty ?? true)
+        XCTAssertTrue(v6.excludedRoutes?.isEmpty ?? true)
+        XCTAssertEqual(settings.mtu, 1_400)
+        XCTAssertThrowsError(try VPNTunnelConfiguration.networkSettings(remoteAddress: "unresolved.example"))
     }
 
     func testMenuProcessCannotWriteSystemCredentialsOrProbeStorage() throws {

@@ -29,6 +29,37 @@ final class VPNConnectivityCheckTests: XCTestCase {
             XCTAssertEqual(result.passed, expected)
             XCTAssertEqual(result.status, code)
             XCTAssertGreaterThanOrEqual(result.milliseconds, 0)
+            if path == "/timeout" { XCTAssertTrue(result.detail?.contains("Timeout") == true) }
         }
     }
+    func testTimingDistinguishesIncompleteDNSConnectTLSAndResponseWait() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var timing = VPNConnectionTiming()
+        XCTAssertEqual(timing.phase, "unavailable")
+        timing.dnsStart = start
+        XCTAssertEqual(timing.phase, "DNS lookup")
+        timing.dnsEnd = start.addingTimeInterval(0.1); timing.connectStart = timing.dnsEnd
+        XCTAssertEqual(timing.phase, "connection establishment")
+        timing.tlsStart = start.addingTimeInterval(0.2)
+        XCTAssertEqual(timing.phase, "TLS handshake")
+        timing.tlsEnd = start.addingTimeInterval(0.4); timing.connectEnd = timing.tlsEnd
+        timing.requestStart = timing.tlsEnd
+        XCTAssertEqual(timing.phase, "waiting for HTTP response")
+        timing.responseStart = start.addingTimeInterval(0.6)
+        XCTAssertEqual(timing.phase, "HTTP response")
+        XCTAssertTrue(timing.summary.contains("DNS"))
+        XCTAssertTrue(timing.summary.contains("TLS"))
+        timing.dnsEnd = start.addingTimeInterval(-1)
+        XCTAssertFalse(timing.summary.contains("DNS"))
+    }
+
+    func testConnectionTimingLabelsOverlappingTLSInterval() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var timing = VPNConnectionTiming(connectStart: start, connectEnd: start.addingTimeInterval(0.375),
+                                         tlsStart: start.addingTimeInterval(0.125), tlsEnd: start.addingTimeInterval(0.375))
+        XCTAssertEqual(timing.summary, "Connect incl. TLS 375 ms · TLS 250 ms")
+        timing.tlsStart = nil; timing.tlsEnd = nil
+        XCTAssertEqual(timing.summary, "Connect 375 ms")
+    }
+
 }
