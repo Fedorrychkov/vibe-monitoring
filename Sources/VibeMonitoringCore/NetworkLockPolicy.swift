@@ -74,6 +74,9 @@ public struct NetworkLockRules: Sendable {
                 guard bytes.count >= offset + 4 else { return false }
                 type = Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3]); offset += 4
             }
+            // 802.1X/WPA EAPOL key exchange keeps Wi-Fi associated (e.g. periodic group-key rekeys).
+            // It is not routable beyond the access point and carries no IP payload.
+            if type == 0x888e { return bytes.count >= offset + 4 && (1...3).contains(bytes[offset]) }
             if type == 0x0806 {
                 // ARP only resolves local-link IPv4 neighbors, including networks with public addressing.
                 guard bytes.count >= offset + 28 else { return false }
@@ -176,6 +179,8 @@ public struct NetworkLockHealth: Codable, Sendable {
     public let tunnelInterface: String?
     public let nodeID: String?
     public var preservedPolicyReloads: Int? = nil
+    /// Process-lifetime count of tunnel bindings dropped because the provider stopped renewing them.
+    public var expiredBindings: Int? = nil
     public func confirms(_ policy: NetworkLockPolicy) -> Bool {
         active && validPolicy && revision == policy.revision && mode == policy.mode && nodeID == policy.nodeID
     }

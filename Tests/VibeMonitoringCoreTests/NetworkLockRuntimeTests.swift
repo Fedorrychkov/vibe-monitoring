@@ -102,4 +102,48 @@ final class NetworkLockRuntimeTests: XCTestCase {
             XCTAssertFalse(permits(runtime, interface: "en0"))
         }
     }
+
+    func testBindingLeaseExpiresWhenProviderStopsRenewing() throws {
+        let clock = TestClock()
+        let runtime = NetworkLockRuntime(lease: 10, clock: { clock.now })
+        let policy = try NetworkLockPolicy(mode: .protected, endpoints: [.init(ip: "192.0.2.1", port: 443)], nodeID: node)
+        runtime.install(policy, active: true)
+        XCTAssertTrue(runtime.bind(try .init(nodeID: node, interface: "utun7")))
+        clock.now = 9
+        XCTAssertTrue(permits(runtime))
+        XCTAssertTrue(runtime.bind(try .init(nodeID: node, interface: "utun7"))) // Renewal extends the lease.
+        clock.now = 18
+        XCTAssertTrue(permits(runtime))
+        XCTAssertEqual(runtime.health().tunnelInterface, "utun7")
+        // Our provider is gone; the reused utun name must not stay allowed wholesale.
+        clock.now = 19
+        XCTAssertFalse(permits(runtime))
+        XCTAssertNil(runtime.health().tunnelInterface)
+        XCTAssertTrue(runtime.health().confirms(policy))
+        XCTAssertEqual(runtime.health().expiredBindings, 1)
+        XCTAssertFalse(permits(runtime, interface: "en0"))
+        // An explicit saved interface cannot revive an expired binding.
+        runtime.install(try .init(mode: .protected, endpoints: policy.endpoints, tunnelInterface: "utun7",
+                                  revision: policy.revision, nodeID: node), active: true)
+        XCTAssertFalse(permits(runtime))
+        XCTAssertTrue(runtime.bind(try .init(nodeID: node, interface: "utun7")))
+        XCTAssertTrue(permits(runtime))
+    }
+
+    func testPreservedInterfaceDuringServerChangeKeepsExistingLease() throws {
+        let clock = TestClock()
+        let runtime = NetworkLockRuntime(lease: 10, clock: { clock.now })
+        runtime.install(try .init(mode: .protected, nodeID: node), active: true)
+        XCTAssertTrue(runtime.bind(try .init(nodeID: node, interface: "utun7")))
+        let next = String(repeating: "b", count: 64)
+        clock.now = 5
+        runtime.install(try .init(mode: .protected, tunnelInterface: "utun7", nodeID: next), active: true)
+        XCTAssertTrue(permits(runtime))
+        clock.now = 10 // A policy change is not a provider renewal.
+        XCTAssertFalse(permits(runtime))
+        XCTAssertTrue(runtime.bind(try .init(nodeID: next, interface: "utun7")))
+        XCTAssertTrue(permits(runtime))
+    }
 }
+
+private final class TestClock: @unchecked Sendable { var now: UInt64 = 0 }
