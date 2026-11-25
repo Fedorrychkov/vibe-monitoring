@@ -50,6 +50,7 @@ enum VPNReadOnlyDiagnostics {
             report["networkLock"] = ["active": health.active, "validPolicy": health.validPolicy,
                                       "mode": health.mode?.rawValue ?? "unknown", "hasBoundTunnel": health.tunnelInterface != nil]
             if let count = health.preservedPolicyReloads { report["preservedLockPolicyReloads"] = count }
+            if let count = health.expiredBindings { report["expiredLockBindings"] = count }
         } else { report["networkLock"] = "unavailable" }
         if checkNetwork {
             let checks = await VPNConnectivityCheck.run()

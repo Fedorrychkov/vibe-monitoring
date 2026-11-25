@@ -79,3 +79,16 @@ The read-only diagnostic reports `preservedLockPolicyReloads`, a process-lifetim
 - The UI confirms saved OS removal/disablement; this is not a claim that every existing socket was repaired. An unavailable or failed acknowledgement remains unverified.
 
 Required device acceptance: protected → direct → Happ; paused → retry; direct recovery with unavailable provider IPC; direct recovery after a failed connection; app close/relaunch and reboot. No device test was run while preparing this candidate because the user's current Happ connection must remain untouched.
+
+## Lock hardening review
+
+- **Kernel interface identity.** A live binding includes the nonzero system interface index. The filter validates it against the current name at IPC binding and compares it with `nw_interface_get_index` for each packet on that name. Reusing a utun name with a different index discards the old permission immediately, without waiting for the lease. Saved policy reloads retain only an already-authenticated runtime index. No saved name/index is trusted after restart. The 15-second lease is an additional expiry bound, not a measured kill-switch reaction time. Native crash, index/name reuse and sleep/wake tests remain outstanding.
+
+- **Binding lease.** A tunnel-interface binding now expires 15 s after the provider's last authenticated renewal (the provider renews every ~2 s while its core runs). Previously a binding survived the death of our provider for the filter's lifetime; macOS reuses utun unit numbers, so a later tunnel owned by another process could inherit the "allow everything on this utun" rule. An expired binding falls back to the normal protected rules (endpoint TCP and link maintenance only). A policy reload or server change keeps, but does not extend, an existing lease; a saved interface name cannot revive an expired one. Diagnostics report `expiredLockBindings`.
+- **EAPOL.** 802.1X/WPA EAPOL frames (ethertype 0x888e, versions 1–3) are allowed as link maintenance, like ARP. They are not routable past the access point and carry no IP payload. Whether macOS delivers these frames to the packet filter at all has not been checked on device; without this exception, enterprise Wi-Fi reauthentication or group-key rekeys could be dropped under the lock.
+- **Duplicate VPN profiles.** Allow direct Internet and Pause now retire every VPN profile of ours. The strict single-profile check made explicit recovery impossible when an interrupted save or upgrade left two profiles; Connect still refuses that state.
+- **Server-change rollback** restores the previous endpoints on the still-live interface instead of dropping the provider binding.
+- **Disabled outside the app.** When the lock is requested but our filter is disabled or removed in macOS settings, the status reads "Network lock disabled in macOS · direct traffic not blocked" instead of a generic unconfirmed state.
+- **Component replacement warning.** Updating the lock component while the lock is requested asks for confirmation, because the replacement gap is not leak-tested.
+
+These are code and pure-test changes only. The device checks listed above remain outstanding, and the extensions only pick up this code after a CFBundleVersion bump.
