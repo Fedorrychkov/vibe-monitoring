@@ -1,6 +1,6 @@
 # Persistent network lock: required behavior
 
-Status: experimental 0.3.10 candidate. The previous 0.3.9 device test exposed a recovery failure requiring a reboot. New recovery behavior is tested in code and must still be checked on device before a stable release.
+Status: experimental 0.3.11 candidate (build 16). The previous 0.3.9 device test exposed a recovery failure requiring a reboot. New recovery behavior is tested in code and must still be checked on device before a stable release.
 
 ## User contract
 
