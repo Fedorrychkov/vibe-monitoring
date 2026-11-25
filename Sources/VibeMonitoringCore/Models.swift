@@ -53,8 +53,26 @@ public struct UsageWindow: Equatable, Sendable {
     }
 }
 
+public enum AgentKind: String, Codable, Sendable, CaseIterable, Identifiable {
+    case codex, claude, cursor
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .codex: return "Codex"
+        case .claude: return "Claude Code"
+        case .cursor: return "Cursor"
+        }
+    }
+}
+
+/// A locally observed agent session. The name predates Claude Code and Cursor support.
 public struct CodexSession: Identifiable, Sendable {
     public var id: String
+    public var agent: AgentKind
+    /// Shown when no project path is known (e.g. a Cursor folder name that does not resolve on disk).
+    public var fallbackName: String?
     public var projectPath: String?
     public var model: String?
     public var origin: String?
@@ -72,14 +90,18 @@ public struct CodexSession: Identifiable, Sendable {
     public var plan: String?
     public var isPartialHistory = true
 
-    public init(id: String) { self.id = id }
+    public init(id: String, agent: AgentKind = .codex) {
+        self.id = id
+        self.agent = agent
+    }
 
     public var projectName: String {
-        guard let projectPath, !projectPath.isEmpty else { return "Codex session" }
+        guard let projectPath, !projectPath.isEmpty else { return fallbackName ?? "\(agent.title) session" }
         return URL(fileURLWithPath: projectPath).lastPathComponent
     }
 
     public var shortID: String { String(id.prefix(8)) }
+    public var identity: String { "\(agent.rawValue):\(id)" }
 
     public var statusTimestamp: Date? {
         phase == .completed || phase == .interrupted ? stateChangedAt : lastActivity
@@ -96,11 +118,30 @@ public struct ScanSnapshot: Sendable {
     public var sessions: [CodexSession]
     public var updatedAt: Date
     public var issue: String?
+    /// Agents whose journal directory does not exist (not installed or never used).
+    public var unavailable: Set<AgentKind>
 
-    public init(sessions: [CodexSession] = [], updatedAt: Date = Date(), issue: String? = nil) {
+    public init(sessions: [CodexSession] = [], updatedAt: Date = Date(), issue: String? = nil,
+                unavailable: Set<AgentKind> = []) {
         self.sessions = sessions
         self.updatedAt = updatedAt
         self.issue = issue
+        self.unavailable = unavailable
+    }
+
+    /// Combines per-agent scans. A missing directory for an agent the user does not use is not an issue.
+    public static func merged(_ parts: [ScanSnapshot], reportMissing: Set<AgentKind> = []) -> ScanSnapshot {
+        var result = ScanSnapshot(updatedAt: parts.map(\.updatedAt).max() ?? Date())
+        var issues: [String] = []
+        for part in parts {
+            result.sessions += part.sessions
+            result.unavailable.formUnion(part.unavailable)
+            guard let issue = part.issue else { continue }
+            if part.unavailable.isDisjoint(with: reportMissing) && !part.unavailable.isEmpty { continue }
+            if !issues.contains(issue) { issues.append(issue) }
+        }
+        result.issue = issues.isEmpty ? nil : issues.joined(separator: " ")
+        return result
     }
 
     public func activeCount(at now: Date = Date()) -> Int {

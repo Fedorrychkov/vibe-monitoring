@@ -10,6 +10,15 @@ struct PreferencesView: View {
     var body: some View {
         Form {
             VPNPreferencesView(store: store.vpn, activeTurns: store.snapshot.activeCount())
+            Section("Agents") {
+                ForEach(AgentKind.allCases) { agent in
+                    Toggle("Monitor \(agent.title)", isOn: Binding(
+                        get: { store.enabledAgents.contains(agent) }, set: { store.setAgent(agent, enabled: $0) }
+                    ))
+                }
+                Text("Claude Code: ~/.claude/projects (or $CLAUDE_CONFIG_DIR). Cursor: ~/.cursor/projects/*/agent-transcripts. Cursor transcripts have no timestamps or token counts, so its status is inferred from file writes.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Codex") {
                 TextField("Codex home", text: $path).onSubmit { store.applyHome(path) }
                     .textFieldStyle(.roundedBorder)
@@ -28,7 +37,7 @@ struct PreferencesView: View {
                 if let issue = store.notificationIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
             }
             Section("Privacy") {
-                Text("Codex monitoring is local. Quickping contacts its selected server for authorization and monitoring. VPN subscription requests contact the subscription provider; an enabled VPN routes traffic through the selected server. Codex journals and conversation content are never uploaded by the monitor.")
+                Text("Agent monitoring is local. Quickping contacts its selected server for authorization and monitoring. VPN subscription requests contact the subscription provider; an enabled VPN routes traffic through the selected server. Agent transcripts and conversation content are never uploaded by the monitor.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             QuickpingPreferencesView(store: store.quickping)
