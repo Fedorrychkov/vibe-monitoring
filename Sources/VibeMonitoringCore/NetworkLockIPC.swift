@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 @objc public protocol NetworkLockProtocol {
     func bind(_ request: Data, reply: @escaping (Data?) -> Void)
@@ -6,6 +7,10 @@ import Foundation
 }
 
 public enum NetworkLockClient {
+    public static func binding(nodeID: String, interface: String) throws -> NetworkLockBinding {
+        try NetworkLockBinding(nodeID: nodeID, interface: interface, interfaceIndex: if_nametoindex(interface))
+    }
+
     public static func status(binding: NetworkLockBinding? = nil) async throws -> NetworkLockHealth {
         let team = try VPNCredentialIdentity.ownTeam()
         let name = try VPNCredentialIdentity.serviceName(team: team, build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, peer: .networkLock)

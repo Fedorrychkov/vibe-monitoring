@@ -95,7 +95,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func bindNetworkLock() {
         guard !bindingInFlight, !stopping, let node, let interfaceName,
-              let binding = try? NetworkLockBinding(nodeID: node.id, interface: interfaceName) else { return }
+              let binding = try? NetworkLockClient.binding(nodeID: node.id, interface: interfaceName) else { return }
         bindingInFlight = true
         Task {
             let health = try? await NetworkLockClient.status(binding: binding)

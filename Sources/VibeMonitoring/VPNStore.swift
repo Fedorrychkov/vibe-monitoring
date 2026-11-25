@@ -142,6 +142,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
             let previousPolicy = networkLock.policy
             var policyChanged = false
             var committed = false
+            var liveInterface: String?
             state = .connecting
             do {
                 guard let manager = try await loadManager(), policyValid(manager),
@@ -156,6 +157,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 let oldHealth = try JSONDecoder().decode(VPNProviderHealth.self, from: await Self.providerReply(session))
                 guard oldHealth.nodeID == next.selectedID, oldHealth.running, !oldHealth.reasserting,
                       let interface = oldHealth.interfaceName else { throw VPNError.providerUnavailable }
+                liveInterface = interface
                 policyChanged = true
                 try await networkLock.apply(.init(mode: .protected, endpoints: endpoints,
                                                   tunnelInterface: interface, nodeID: node.id))
@@ -176,12 +178,18 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 let health = try JSONDecoder().decode(VPNProviderHealth.self, from: reply)
                 guard health.nodeID == node.id, health.running, !health.reasserting,
                       let name = health.interfaceName, let policy = networkLock.policy else { throw VPNError.providerUnavailable }
-                let filter = try await NetworkLockClient.status(binding: .init(nodeID: node.id, interface: name))
+                let filter = try await NetworkLockClient.status(binding: NetworkLockClient.binding(nodeID: node.id, interface: name))
                 guard filter.confirms(policy), filter.tunnelInterface == name else { throw VPNError.providerUnavailable }
                 state = .connecting
             } catch {
                 if policyChanged, !committed, let previousPolicy, previousPolicy.mode == .protected {
-                    try? await networkLock.apply(previousPolicy)
+                    // Restore the old endpoints on the still-live interface; a rollback without it would
+                    // drop the provider's binding and stall protected traffic until the next renewal.
+                    let rollback = (try? NetworkLockPolicy(mode: .protected, endpoints: previousPolicy.endpoints,
+                                                           tunnelInterface: liveInterface,
+                                                           revision: previousPolicy.revision,
+                                                           nodeID: previousPolicy.nodeID)) ?? previousPolicy
+                    try? await networkLock.apply(rollback)
                 }
                 state = .unverified
                 issue = "Server change was not confirmed. The protection request remains enabled."
@@ -287,7 +295,9 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     }
 
     private func retireTunnel(remove: Bool) async throws {
-        if let manager = try await loadManager() {
+        // Recovery handles every profile of ours, including duplicates left by an interrupted save or upgrade;
+        // the strict single-profile check would otherwise make explicit unlock impossible.
+        for manager in try await loadManagers() {
             manager.isOnDemandEnabled = false
             manager.onDemandRules = []
             manager.isEnabled = false
@@ -302,7 +312,6 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                         if let error { next.resume(throwing: error) } else { next.resume() }
                     }
                 }
-                guard try await loadManager() == nil else { throw VPNError.providerUnavailable }
             }
             for _ in 0..<40 {
                 if [.invalid, .disconnected].contains(manager.connection.status) { break }
@@ -312,11 +321,13 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 throw VPNError.providerUnavailable
             }
         }
+        if remove { guard try await loadManagers().isEmpty else { throw VPNError.providerUnavailable } }
         Logger(subsystem: "dev.vibemonitoring.app", category: "network-mode")
             .notice("Own VPN retired; profile removed: \(remove, privacy: .public)")
     }
 
     var statusTitle: String {
+        if networkLock.disabledOutsideApp { return "Network lock disabled in macOS · direct traffic not blocked" }
         if networkLock.locked && !requested { return "Network locked · VPN paused" }
         if (networkLock.wantsLock || networkLock.policy != nil) && !networkLock.confirmed { return "Network lock not confirmed" }
         if state == .blocked && networkLock.confirmed { return "Network locked · VPN not connected" }
@@ -398,15 +409,19 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     }
 
     private func loadManager() async throws -> NETunnelProviderManager? {
+        let own = try await loadManagers()
+        guard own.count <= 1 else { throw VPNError.invalidConfiguration }
+        return own.first
+    }
+
+    private func loadManagers() async throws -> [NETunnelProviderManager] {
         let all: [NETunnelProviderManager] = try await withCheckedThrowingContinuation { continuation in
             NETunnelProviderManager.loadAllFromPreferences { values, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume(returning: values ?? []) }
             }
         }
-        let own = all.filter { ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == VPNInstallation.providerID }
-        guard own.count <= 1 else { throw VPNError.invalidConfiguration }
-        return own.first
+        return all.filter { ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == VPNInstallation.providerID }
     }
 
     private func save(_ manager: NETunnelProviderManager) async throws {

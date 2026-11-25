@@ -106,7 +106,9 @@ private struct VPNQuickControls: View {
             }
             if !store.networkLock.installed {
                 Button("Install / update network lock…") {
-                    VPNActionConfirmation.perform("Update network lock component", activeTurns: activeTurns) { store.networkLock.install() }
+                    VPNActionConfirmation.perform("Update network lock component",
+                        warning: store.networkLock.wantsLock ? "The lock is currently requested. macOS restarts the filter while replacing it; traffic during that replacement has not been leak-tested. Close sensitive apps first." : nil,
+                        activeTurns: activeTurns) { store.networkLock.install() }
                 }
                     .disabled(store.networkLock.busy || !store.networkLock.ready)
             }
@@ -130,6 +132,10 @@ private struct VPNQuickControls: View {
                  ? "Internet is blocked. Connect VPN to restore protected access, or explicitly allow direct Internet. Closing this window keeps the lock."
                  : "Pausing VPN keeps the lock. If protection is not confirmed, Internet access is not verified. To use Happ or another VPN, first choose Allow direct Internet and wait for confirmation; this removes our VPN profile and disables our filter.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if store.networkLock.disabledOutsideApp {
+                Text("VibeMonitoring Network Lock was disabled or removed outside the app while the lock was requested. Direct traffic is not blocked. Retry VPN + lock to re-enable it, or allow direct Internet to make this explicit.")
+                    .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
             if let issue = store.issue ?? store.networkLock.issue {
                 Text(issue).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }

@@ -19,7 +19,7 @@ final class PacketLockProvider: NEFilterPacketProvider {
         reload()
         packetHandler = { _, interface, direction, pointer, length in
             let name = String(cString: nw_interface_get_name(interface))
-            return LockRuntime.shared.allows(interface: name, outbound: direction == .outbound,
+            return LockRuntime.shared.allows(interface: name, interfaceIndex: nw_interface_get_index(interface), outbound: direction == .outbound,
                 packet: UnsafeRawBufferPointer(start: pointer, count: length),
                 linkLayer: name.hasPrefix("utun") || name == "lo0" ? .ip : .ethernet) ? .allow : .drop
         }

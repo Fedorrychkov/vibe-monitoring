@@ -13,6 +13,8 @@ final class NetworkLockStore: NSObject, ObservableObject, OSSystemExtensionReque
     @Published private(set) var busy = false
     @Published private(set) var issue: String?
     @Published private(set) var filterDisabledConfirmed = false
+    /// Lock is requested, but our saved filter is disabled or removed outside the app: direct traffic is not blocked.
+    @Published private(set) var disabledOutsideApp = false
     private var activation: OSSystemExtensionRequest?
     private let demo: Bool
     private let signingReady: Bool
@@ -44,14 +46,18 @@ final class NetworkLockStore: NSObject, ObservableObject, OSSystemExtensionReque
             guard !busy else { return }
             filterDisabledConfirmed = false
             guard let data = manager.providerConfiguration?.vendorConfiguration?["policy"] as? Data else {
-                policy = nil; health = nil; return
+                policy = nil; health = nil
+                disabledOutsideApp = UserDefaults.standard.bool(forKey: "networkLockRequested")
+                return
             }
             policy = try NetworkLockPolicy.decode(data)
             if !manager.isEnabled {
                 health = nil
                 filterDisabledConfirmed = policy?.mode == .directAllowed
+                disabledOutsideApp = policy?.mode != .directAllowed
                 return
             }
+            disabledOutsideApp = false
             let result = try await NetworkLockClient.status()
             guard !busy else { return }
             health = result
@@ -63,6 +69,7 @@ final class NetworkLockStore: NSObject, ObservableObject, OSSystemExtensionReque
         guard !demo, ready, (value.mode == .directAllowed || installed), !busy else { throw VPNError.signingRequired }
         busy = true; issue = nil
         filterDisabledConfirmed = false
+        disabledOutsideApp = false
         defer { busy = false }
         do {
             let manager = try await load()

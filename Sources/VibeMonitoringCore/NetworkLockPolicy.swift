@@ -74,6 +74,9 @@ public struct NetworkLockRules: Sendable {
                 guard bytes.count >= offset + 4 else { return false }
                 type = Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3]); offset += 4
             }
+            // 802.1X/WPA EAPOL key exchange keeps Wi-Fi associated (e.g. periodic group-key rekeys).
+            // It is not routable beyond the access point and carries no IP payload.
+            if type == 0x888e { return bytes.count >= offset + 4 && (1...3).contains(bytes[offset]) }
             if type == 0x0806 {
                 // ARP only resolves local-link IPv4 neighbors, including networks with public addressing.
                 guard bytes.count >= offset + 28 else { return false }
@@ -176,6 +179,8 @@ public struct NetworkLockHealth: Codable, Sendable {
     public let tunnelInterface: String?
     public let nodeID: String?
     public var preservedPolicyReloads: Int? = nil
+    /// Process-lifetime count of tunnel bindings dropped because the provider stopped renewing them.
+    public var expiredBindings: Int? = nil
     public func confirms(_ policy: NetworkLockPolicy) -> Bool {
         active && validPolicy && revision == policy.revision && mode == policy.mode && nodeID == policy.nodeID
     }
@@ -188,12 +193,14 @@ public struct NetworkLockHealth: Codable, Sendable {
 public struct NetworkLockBinding: Codable, Sendable {
     public let nodeID: String
     public let interface: String
-    public init(nodeID: String, interface: String) throws {
+    public let interfaceIndex: UInt32
+    public init(nodeID: String, interface: String, interfaceIndex: UInt32) throws {
         _ = try NetworkLockPolicy(mode: .protected, tunnelInterface: interface, nodeID: nodeID)
-        self.nodeID = nodeID; self.interface = interface
+        guard interfaceIndex > 0 else { throw VPNError.invalidConfiguration }
+        self.nodeID = nodeID; self.interface = interface; self.interfaceIndex = interfaceIndex
     }
     public func applying(to policy: NetworkLockPolicy) throws -> NetworkLockPolicy {
-        _ = try Self(nodeID: nodeID, interface: interface)
+        _ = try Self(nodeID: nodeID, interface: interface, interfaceIndex: interfaceIndex)
         guard policy.mode == .protected, policy.nodeID == nodeID else { throw VPNError.invalidConfiguration }
         return try .init(mode: .protected, endpoints: policy.endpoints, tunnelInterface: interface,
                          revision: policy.revision, nodeID: nodeID)
