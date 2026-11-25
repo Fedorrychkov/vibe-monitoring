@@ -11,10 +11,14 @@ final class MonitorStore: ObservableObject {
     @Published var codexHome: String
     @Published var notifyOnFinish: Bool
     @Published var notificationIssue: String?
+    @Published var agentFilter: AgentKind?
+    @Published private(set) var enabledAgents: Set<AgentKind>
     let isDemo: Bool
     let quickping: QuickpingStore
     let vpn: VPNStore
     private let scanner = CodexScanner()
+    private let claudeScanner = ClaudeScanner(format: ClaudeJournalFormat())
+    private let cursorScanner = CursorScanner(format: CursorJournalFormat())
     private var polling: Task<Void, Never>?
 
     init(demo: Bool = false, startPolling: Bool = true) {
@@ -23,6 +27,8 @@ final class MonitorStore: ObservableObject {
         vpn = VPNStore(demo: demo)
         codexHome = UserDefaults.standard.string(forKey: "codexHome") ?? CodexScanner.defaultHome().path
         notifyOnFinish = UserDefaults.standard.bool(forKey: "notifyOnFinish")
+        let disabled = Set((UserDefaults.standard.stringArray(forKey: "disabledAgents") ?? []).compactMap(AgentKind.init(rawValue:)))
+        enabledAgents = Set(AgentKind.allCases).subtracting(disabled)
         if demo { snapshot = DemoData.snapshot() }
         if startPolling {
             polling = Task { [weak self] in
@@ -38,6 +44,7 @@ final class MonitorStore: ObservableObject {
 
     var visibleSessions: [CodexSession] {
         snapshot.sessions.filter { showFinished || $0.displayPhase() != .completed }
+            .filter { agentFilter == nil || $0.agent == agentFilter }
             .sorted { lhs, rhs in
                 let left = rank(lhs.displayPhase()), right = rank(rhs.displayPhase())
                 if left != right { return left < right }
@@ -63,20 +70,34 @@ final class MonitorStore: ObservableObject {
         if isDemo { snapshot = DemoData.snapshot(); return }
         let home = URL(fileURLWithPath: NSString(string: codexHome).expandingTildeInPath)
         let previous = Dictionary(snapshot.sessions.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-        let next = await scanner.scan(home: home)
+        var parts: [ScanSnapshot] = []
+        if enabledAgents.contains(.codex) { parts.append(await scanner.scan(home: home)) }
+        if enabledAgents.contains(.claude) { parts.append(await claudeScanner.scan(home: ClaudeJournalFormat.defaultHome())) }
+        if enabledAgents.contains(.cursor) { parts.append(await cursorScanner.scan(home: CursorJournalFormat.defaultHome())) }
+        // A missing directory only matters for a Codex home the user chose explicitly.
+        let customHome = UserDefaults.standard.string(forKey: "codexHome") != nil
+        let next = ScanSnapshot.merged(parts, reportMissing: customHome ? [.codex] : [])
         snapshot = next
         guard notifyOnFinish else { return }
         for session in next.sessions where session.phase == .completed {
             guard previous[session.id]?.phase == .running,
                   let finished = session.stateChangedAt, Date().timeIntervalSince(finished) < 60 else { continue }
             let content = UNMutableNotificationContent()
-            content.title = "Codex turn finished"
+            content.title = "\(session.agent.title) turn finished"
             content.body = session.projectName
             content.sound = .default
             let request = UNNotificationRequest(identifier: "\(session.id)-\(session.activeTurnID ?? "turn")",
                                                 content: content, trigger: nil)
             try? await UNUserNotificationCenter.current().add(request)
         }
+    }
+
+    func setAgent(_ agent: AgentKind, enabled: Bool) {
+        if enabled { enabledAgents.insert(agent) } else { enabledAgents.remove(agent) }
+        let disabled = AgentKind.allCases.filter { !enabledAgents.contains($0) }.map(\.rawValue)
+        UserDefaults.standard.set(disabled, forKey: "disabledAgents")
+        if agentFilter.map({ !enabledAgents.contains($0) }) == true { agentFilter = nil }
+        Task { await refresh() }
     }
 
     func applyHome(_ path: String) {

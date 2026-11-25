@@ -40,6 +40,22 @@ public enum DemoData {
         stale.phase = .running
         stale.lastActivity = now.addingTimeInterval(-900)
 
-        return ScanSnapshot(sessions: [active, finished, stale], updatedAt: now)
+        var claude = CodexSession(id: "demo-claude", agent: .claude)
+        claude.projectPath = "/demo/projects/billing-core"
+        claude.origin = "Claude Code · cli"
+        claude.model = "example-model"
+        claude.phase = .running
+        claude.lastActivity = now.addingTimeInterval(-4)
+        claude.usage = TokenUsage(input: 210_000, cachedInput: 180_000, cacheWriteInput: 20_000, output: 9_600, total: 219_600)
+        claude.isPartialHistory = false
+
+        var cursor = CodexSession(id: "demo-cursor", agent: .cursor)
+        cursor.projectPath = "/demo/projects/landing"
+        cursor.origin = "Cursor agent"
+        cursor.phase = .completed
+        cursor.lastActivity = now.addingTimeInterval(-300)
+        cursor.stateChangedAt = cursor.lastActivity
+
+        return ScanSnapshot(sessions: [active, claude, finished, cursor, stale], updatedAt: now)
     }
 }

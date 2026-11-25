@@ -65,15 +65,22 @@ struct DashboardView: View {
                     VPNView(store: store.vpn, activeTurns: store.snapshot.activeCount())
                     QuickpingView(store: store.quickping)
                     HStack {
-                        Label("Codex", systemImage: "terminal").font(.headline)
+                        Label("Agents", systemImage: "terminal").font(.headline)
                         Spacer()
+                        Picker("Agent", selection: $store.agentFilter) {
+                            Text("All").tag(AgentKind?.none)
+                            ForEach(AgentKind.allCases.filter { store.enabledAgents.contains($0) }) { agent in
+                                Text(agent.title).tag(AgentKind?.some(agent))
+                            }
+                        }.labelsHidden().pickerStyle(.menu).fixedSize().font(.caption)
                         Toggle("Show finished", isOn: $store.showFinished).toggleStyle(.checkbox).font(.caption)
                     }.padding(.top, 10)
                     if store.visibleSessions.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "terminal").font(.largeTitle).foregroundStyle(.secondary)
                             Text("No sessions to show").font(.headline)
-                            Text("Start a local Codex session, or check the Codex home directory in Settings.")
+                            Text(store.enabledAgents.isEmpty ? "All agents are turned off in Settings."
+                                 : "Start a local Codex, Claude Code or Cursor agent session, or check agent settings.")
                                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }.frame(maxWidth: .infinity).padding(.vertical, 36)
                     }
@@ -84,10 +91,10 @@ struct DashboardView: View {
             }.padding(.top, 16)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Activity comes from local Codex journals. A quiet or crashed process may leave a stale signal.")
+                Text("Activity comes from local Codex, Claude Code and Cursor transcripts. A quiet or crashed process may leave a stale signal; Cursor status is inferred from transcript writes.")
                     .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Label("Codex read only", systemImage: "lock.shield").font(.caption2).foregroundStyle(.secondary)
+                    Label("Agents read only", systemImage: "lock.shield").font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Button { Task { await store.refresh(); await store.quickping.refresh() } } label: {
                         Image(systemName: "arrow.clockwise")
@@ -152,6 +159,8 @@ struct SessionCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(session.projectName).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                     HStack(spacing: 5) {
+                        Text(session.agent.title).foregroundStyle(.secondary)
+                        Text("·").foregroundStyle(.tertiary)
                         Text(phase.title).foregroundStyle(phase.color)
                         if let date = session.statusTimestamp {
                             Text("·").foregroundStyle(.tertiary)
@@ -170,7 +179,7 @@ struct SessionCard: View {
             }
 
             if let usage = session.usage {
-                Text("Recorded thread totals").font(.system(size: 9)).foregroundStyle(.secondary)
+                Text(session.usageCaption).font(.system(size: 9)).foregroundStyle(.secondary)
                 HStack(spacing: 12) {
                     token("IN", usage.input)
                     token("CACHE", usage.cachedInput)
@@ -181,7 +190,7 @@ struct SessionCard: View {
 
             if expanded {
                 Divider()
-                LabeledContent("Source", value: session.origin ?? "Codex")
+                LabeledContent("Source", value: session.origin ?? session.agent.title)
                 LabeledContent("Model", value: session.model ?? "Not in recent events")
                 LabeledContent("Session", value: session.shortID)
                 if let duration = session.turnDuration {
@@ -190,7 +199,7 @@ struct SessionCard: View {
                 if let primary = session.primaryWindow { QuotaView(window: primary) }
                 if let secondary = session.secondaryWindow { QuotaView(window: secondary) }
                 if let usage = session.usage {
-                    Text("Recorded thread total: \(usage.total.formatted()) tokens. Cached input is part of input; reasoning is part of output. These counters are not a bill.")
+                    Text("\(session.usageCaption): \(usage.total.formatted()) tokens. Cached input is part of input; reasoning is part of output. These counters are not a bill.")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 if let path = session.projectPath {
@@ -211,6 +220,17 @@ struct SessionCard: View {
             Text(label).font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
             Text(value.formatted(.number.notation(.compactName)))
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
+        }
+    }
+}
+
+extension CodexSession {
+    var usageCaption: String {
+        switch agent {
+        case .codex: return "Recorded thread totals"
+        // Claude Code records per-message usage; a bounded tail sums only the recent part.
+        case .claude: return isPartialHistory ? "Totals from the recent transcript tail" : "Recorded session totals"
+        case .cursor: return "Recorded totals"
         }
     }
 }
@@ -258,16 +278,16 @@ enum DemoPreview {
                     .padding(6).background(.indigo.opacity(0.08), in: Capsule())
             }.padding(.bottom, 6)
             HStack {
-                MetricCard(value: "1", title: "Active turns", symbol: "bolt.fill", color: .indigo)
-                MetricCard(value: "3", title: "Recent sessions", symbol: "square.stack.3d.up", color: .teal)
+                MetricCard(value: "\(snapshot.activeCount())", title: "Active turns", symbol: "bolt.fill", color: .indigo)
+                MetricCard(value: "\(snapshot.sessions.count)", title: "Recent sessions", symbol: "square.stack.3d.up", color: .teal)
             }
             VPNView(store: VPNStore(demo: true), showsSettings: false)
-            Label("Codex", systemImage: "terminal").font(.headline).padding(.top, 6)
+            Label("Agents", systemImage: "terminal").font(.headline).padding(.top, 6)
             ForEach(snapshot.sessions) { session in
                 SessionCard(session: session, initiallyExpanded: session.displayPhase() == .running)
             }
             QuickpingView(store: QuickpingStore(demo: true))
-            Label("Codex local · Quickping optional · Demo data", systemImage: "lock.shield")
+            Label("Agents local · Quickping optional · Demo data", systemImage: "lock.shield")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(22).frame(width: 460)
