@@ -8,11 +8,11 @@ The current binary architecture is **Apple silicon (arm64)**, requiring macOS 13
 
 1. Read the release notes and download its `.dmg` and `.dmg.sha256` files. Compare `shasum -a 256 VibeMonitoring-VERSION-arm64.dmg` with the checksum file.
 2. Open the DMG and drag **VibeMonitoring.app** to **Applications**. Downloads do not require Xcode or a Developer account.
-3. Launch the app. Codex monitoring works without VPN installation. VPN and Network Lock components require separate explicit installation and macOS approval in the app's Protection controls.
+3. Launch the app. Codex, Claude Code and Cursor monitoring work without VPN installation. VPN and Network Lock components require separate explicit installation and macOS approval in the app's Protection controls.
 
 Before replacing an existing experimental VPN build, choose **Allow direct Internet** and verify that your network works through your chosen connection. Wait for the app to finish before enabling Happ or another VPN. Updating the app/components can interrupt an active tunnel; do not update while relying on it.
 
-**0.3.10 is a recovery candidate.** Earlier versions experienced intermittent TLS stalls and a recovery failure requiring a reboot. The changed handoff and explicit filter disablement still need device validation. Signing/notarization does not certify VPN privacy, absence of leaks or successful recovery.
+**0.3.11 is an experimental candidate.** It adds Claude Code/Cursor monitoring and network-lock hardening. Earlier versions experienced intermittent TLS stalls and a recovery failure requiring a reboot. Crash, handoff and explicit filter disablement still need device validation. Signing/notarization does not certify VPN privacy, absence of leaks or successful recovery.
 
 ## Build the monitoring app yourself
 
@@ -21,7 +21,7 @@ Install Xcode or Command Line Tools providing Swift 5.9+, then check out the rel
 ```sh
 git clone https://github.com/Fedorrychkov/vibe-monitoring.git
 cd vibe-monitoring
-git checkout v0.3.10
+git checkout v0.3.11
 swift test
 bash scripts/build-app.sh
 open dist/VibeMonitoring.app

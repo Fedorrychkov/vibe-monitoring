@@ -12,7 +12,7 @@ enum VPNActionConfirmation {
         alert.messageText = title
         var text = direct ? "This removes our VPN profile and disables our network filter. Your subscription stays saved. Wait for confirmation before starting Happ or another VPN. Direct Internet can expose your real IP; existing connections may reconnect outside our VPN." : "This changes network access. Open connections may pause or reconnect."
         if let warning { text += "\n" + warning }
-        if activeTurns > 0 { text += "\nObserved active Codex turns: \(activeTurns)." }
+        if activeTurns > 0 { text += "\nObserved active agent turns: \(activeTurns)." }
         if !applications.isEmpty { text += "\nOpen apps: " + Array(Set(applications)).sorted().joined(separator: ", ") + "." }
         text += "\nThis is a local app list, not a complete inventory of background network activity."
         alert.informativeText = text
