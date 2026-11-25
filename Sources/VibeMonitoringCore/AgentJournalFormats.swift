@@ -23,6 +23,7 @@ public struct ClaudeJournalFormat: JournalFormat, @unchecked Sendable {
     public init() { fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds] }
 
     public var agent: AgentKind { .claude }
+    public var recoversTurnStart: Bool { true }
     public func root(home: URL) -> URL { home.appendingPathComponent("projects") }
     public var missingIssue: String { "No Claude Code projects directory." }
     public func includes(_ components: [String]) -> Bool { components.count == 2 }
@@ -60,15 +61,15 @@ public struct ClaudeJournalFormat: JournalFormat, @unchecked Sendable {
             if let model = message.model, model != "<synthetic>" { session.model = model }
             if let usage = message.usage?.value {
                 // Each content block of one API message is a separate line repeating the same usage.
-                if let id = message.id, id == state.messageID {
-                    state.totals = state.totals.subtracting(state.messageUsage).adding(usage)
-                } else {
-                    state.totals = state.totals.adding(usage)
+                let previous = message.id != nil && message.id == state.messageID
+                    ? state.totals.subtracting(state.messageUsage) : state.totals
+                if let totals = previous.adding(usage) {
+                    state.totals = totals
                     state.messageID = message.id
+                    state.messageUsage = usage
+                    session.usage = state.totals
+                    session.usageObservedAt = date
                 }
-                state.messageUsage = usage
-                session.usage = state.totals
-                session.usageObservedAt = date
             }
         }
         guard (date ?? .distantPast) >= (session.stateChangedAt ?? .distantPast) else { return }
@@ -195,17 +196,24 @@ private struct ClaudeUsage: Decodable {
         let values = [input, cacheRead, cacheCreation, output].compactMap { $0 }
         guard !values.isEmpty, values.allSatisfy({ $0 >= 0 }) else { return nil }
         let read = cacheRead ?? 0, write = cacheCreation ?? 0
-        let total = (input ?? 0) + read + write
+        let (cached, cacheOverflow) = read.addingReportingOverflow(write)
+        let (total, inputOverflow) = (input ?? 0).addingReportingOverflow(cached)
+        let (tokens, totalOverflow) = total.addingReportingOverflow(output ?? 0)
+        guard !cacheOverflow, !inputOverflow, !totalOverflow else { return nil }
         return TokenUsage(input: total, cachedInput: read, cacheWriteInput: write,
-                          output: output ?? 0, total: total + (output ?? 0))
+                          output: output ?? 0, total: tokens)
     }
 }
 
 extension TokenUsage {
-    func adding(_ other: TokenUsage) -> TokenUsage {
-        TokenUsage(input: input + other.input, cachedInput: cachedInput + other.cachedInput,
-                   cacheWriteInput: cacheWriteInput + other.cacheWriteInput, output: output + other.output,
-                   reasoningOutput: reasoningOutput + other.reasoningOutput, total: total + other.total)
+    func adding(_ other: TokenUsage) -> TokenUsage? {
+        var result = self
+        for key in [\Self.input, \.cachedInput, \.cacheWriteInput, \.output, \.reasoningOutput, \.total] {
+            let (value, overflow) = self[keyPath: key].addingReportingOverflow(other[keyPath: key])
+            guard !overflow else { return nil }
+            result[keyPath: key] = value
+        }
+        return result
     }
 
     func subtracting(_ other: TokenUsage) -> TokenUsage {
@@ -319,21 +327,23 @@ public struct CursorJournalFormat: JournalFormat, @unchecked Sendable {
         guard !tokens.isEmpty, tokens.count <= 40, !tokens.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return nil }
         let fileManager = FileManager.default
         var budget = 400
-        func search(_ index: Int, _ path: String) -> String? {
-            if index == tokens.count { return path }
+        var matches: [String] = []
+        func search(_ index: Int, _ path: String) {
+            if index == tokens.count { matches.append(path); return }
             var component = ""
             for end in index..<tokens.count {
                 budget -= 1
-                guard budget > 0 else { return nil }
+                guard budget > 0, matches.count < 2 else { return }
                 component += (component.isEmpty ? "" : "-") + tokens[end]
                 let candidate = path + "/" + component
                 var isDirectory: ObjCBool = false
-                if fileManager.fileExists(atPath: candidate, isDirectory: &isDirectory), isDirectory.boolValue,
-                   let found = search(end + 1, candidate) { return found }
+                if fileManager.fileExists(atPath: candidate, isDirectory: &isDirectory), isDirectory.boolValue {
+                    search(end + 1, candidate)
+                }
             }
-            return nil
         }
-        return search(0, "")
+        search(0, "")
+        return matches.count == 1 && budget > 0 ? matches.first : nil
     }
 }
 

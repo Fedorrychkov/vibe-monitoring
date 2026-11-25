@@ -69,7 +69,7 @@ final class MonitorStore: ObservableObject {
         defer { isRefreshing = false }
         if isDemo { snapshot = DemoData.snapshot(); return }
         let home = URL(fileURLWithPath: NSString(string: codexHome).expandingTildeInPath)
-        let previous = Dictionary(snapshot.sessions.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let previous = Dictionary(snapshot.sessions.map { ($0.identity, $0) }, uniquingKeysWith: { _, last in last })
         var parts: [ScanSnapshot] = []
         if enabledAgents.contains(.codex) { parts.append(await scanner.scan(home: home)) }
         if enabledAgents.contains(.claude) { parts.append(await claudeScanner.scan(home: ClaudeJournalFormat.defaultHome())) }
@@ -80,13 +80,13 @@ final class MonitorStore: ObservableObject {
         snapshot = next
         guard notifyOnFinish else { return }
         for session in next.sessions where session.phase == .completed {
-            guard previous[session.id]?.phase == .running,
+            guard previous[session.identity]?.phase == .running,
                   let finished = session.stateChangedAt, Date().timeIntervalSince(finished) < 60 else { continue }
             let content = UNMutableNotificationContent()
             content.title = "\(session.agent.title) turn finished"
             content.body = session.projectName
             content.sound = .default
-            let request = UNNotificationRequest(identifier: "\(session.id)-\(session.activeTurnID ?? "turn")",
+            let request = UNNotificationRequest(identifier: "\(session.identity)-\(session.activeTurnID ?? "turn")",
                                                 content: content, trigger: nil)
             try? await UNUserNotificationCenter.current().add(request)
         }

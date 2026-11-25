@@ -101,6 +101,7 @@ public struct CodexSession: Identifiable, Sendable {
     }
 
     public var shortID: String { String(id.prefix(8)) }
+    public var identity: String { "\(agent.rawValue):\(id)" }
 
     public var statusTimestamp: Date? {
         phase == .completed || phase == .interrupted ? stateChangedAt : lastActivity

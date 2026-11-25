@@ -15,6 +15,8 @@ public protocol JournalFormat: Sendable {
     func initialState() -> State
     /// The first line is applied before a bounded tail is read (Codex keeps session metadata there).
     var readsHeader: Bool { get }
+    /// Only lifecycle formats need to look before the bounded tail for a turn start.
+    var recoversTurnStart: Bool { get }
     func apply(_ line: Data, to session: inout CodexSession, state: inout State)
     /// Reverse scan used when the file is larger than the tail: nil skips a line; `true` stops at the turn start.
     func turnEvent(in line: Data) -> Bool?
@@ -25,6 +27,7 @@ public protocol JournalFormat: Sendable {
 public extension JournalFormat {
     func descends(into components: [String]) -> Bool { true }
     var readsHeader: Bool { false }
+    var recoversTurnStart: Bool { false }
     func turnEvent(in line: Data) -> Bool? { nil }
     func refresh(_ session: inout CodexSession, state: State, modified: Date, now: Date) {}
 }
@@ -140,8 +143,10 @@ public actor JournalScanner<Format: JournalFormat> {
                 let skipped = prefix.firstIndex(of: 10).map { prefix.distance(from: prefix.startIndex, to: $0) + 1 } ?? prefix.count
                 // A long active turn can begin well before the token/activity tail. The reverse scan stops
                 // where the tail starts, so no line is applied twice (Claude usage is additive).
-                for event in try latestTurnEvents(in: handle, before: start + UInt64(skipped)) {
-                    format.apply(event, to: &session, state: &state)
+                if format.recoversTurnStart {
+                    for event in try latestTurnEvents(in: handle, before: start + UInt64(skipped)) {
+                        format.apply(event, to: &session, state: &state)
+                    }
                 }
                 cursor = Cursor(session: session, state: state, offset: end, modified: modified, inode: inode,
                                 framer: LineFramer())
@@ -186,6 +191,7 @@ public struct CodexJournalFormat: JournalFormat {
     }
     public func initialState() {}
     public var readsHeader: Bool { true }
+    public var recoversTurnStart: Bool { true }
     public func apply(_ line: Data, to session: inout CodexSession, state: inout Void) { parser.apply(line, to: &session) }
     public func turnEvent(in line: Data) -> Bool? {
         parser.turnEventType(in: line).map { $0 == "task_started" }

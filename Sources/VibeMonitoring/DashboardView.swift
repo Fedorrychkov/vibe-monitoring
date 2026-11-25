@@ -84,7 +84,7 @@ struct DashboardView: View {
                                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }.frame(maxWidth: .infinity).padding(.vertical, 36)
                     }
-                    ForEach(store.visibleSessions) { session in
+                    ForEach(store.visibleSessions, id: \.identity) { session in
                         SessionCard(session: session, initiallyExpanded: store.isDemo && session.displayPhase() == .running)
                     }
                 }.padding(.horizontal, 20).padding(.bottom, 16)
@@ -283,7 +283,7 @@ enum DemoPreview {
             }
             VPNView(store: VPNStore(demo: true), showsSettings: false)
             Label("Agents", systemImage: "terminal").font(.headline).padding(.top, 6)
-            ForEach(snapshot.sessions) { session in
+            ForEach(snapshot.sessions, id: \.identity) { session in
                 SessionCard(session: session, initiallyExpanded: session.displayPhase() == .running)
             }
             QuickpingView(store: QuickpingStore(demo: true))

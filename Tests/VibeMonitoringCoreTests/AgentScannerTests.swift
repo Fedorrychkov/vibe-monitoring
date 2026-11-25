@@ -205,7 +205,48 @@ final class AgentScannerTests: XCTestCase {
         XCTAssertNil(CursorJournalFormat.resolveWorkspace("a--..-b"))
     }
 
+    func testCursorWorkspaceResolutionRejectsAmbiguousPaths() throws {
+        let dashed = directory.appendingPathComponent("a-b/work")
+        let nested = directory.appendingPathComponent("a/b/work")
+        try FileManager.default.createDirectory(at: dashed, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let encoded = dashed.path.dropFirst().replacingOccurrences(of: "/", with: "-")
+        XCTAssertNil(CursorJournalFormat.resolveWorkspace(encoded))
+    }
+
+    func testTailOnlyFormatDoesNotReadBackThroughOldHistory() async throws {
+        let file = directory.appendingPathComponent("history.jsonl")
+        try write((0..<100).map { _ in ["padding": String(repeating: "x", count: 100)] }
+                  + [["done": true]], to: file)
+        let calls = ReverseCalls()
+        let scanner = JournalScanner(format: TailOnlyFormat(calls: calls), tailBytes: 1024)
+        let session = await scanner.scan(home: directory).sessions.first
+        XCTAssertEqual(session?.phase, .completed)
+        XCTAssertTrue(session?.isPartialHistory == true)
+        XCTAssertEqual(calls.count, 0, "A format with no turn-start markers only needs its bounded tail")
+    }
+
     // MARK: Merging
+
+    func testSessionIdentitySeparatesAgentsWithoutChangingRawIDs() {
+        let sessions = AgentKind.allCases.map { CodexSession(id: "same-session", agent: $0) }
+        XCTAssertEqual(Set(sessions.map(\.identity)).count, 3)
+        XCTAssertTrue(sessions.allSatisfy { $0.id == "same-session" && $0.shortID == "same-ses" })
+    }
+
+    func testClaudeOversizedUsageIsIgnoredWithoutLosingLifecycle() async throws {
+        try write([user("Start", at: "00"), assistant("invalid", stop: "end_turn", at: "01", input: Int.max)],
+                  to: claudeJournal)
+        let scanner = ClaudeScanner(format: ClaudeJournalFormat())
+        let invalid = await scanner.scan(home: directory).sessions.first
+        XCTAssertNil(invalid?.usage)
+        XCTAssertEqual(invalid?.phase, .completed)
+        try append([assistant("largest", stop: "tool_use", at: "02", input: Int.max - 120, output: 0),
+                    assistant("overflow", stop: "end_turn", at: "03")], to: claudeJournal)
+        let full = await scanner.scan(home: directory).sessions.first
+        XCTAssertEqual(full?.usage?.total, Int64.max)
+        XCTAssertEqual(full?.phase, .completed)
+    }
 
     func testMergeHidesMissingAgentsUnlessRequested() async {
         let missing = directory.appendingPathComponent("missing")
@@ -219,4 +260,27 @@ final class AgentScannerTests: XCTestCase {
         let failure = ScanSnapshot(issue: "Some local journals could not be read.")
         XCTAssertEqual(ScanSnapshot.merged(parts + [failure]).issue, failure.issue)
     }
+}
+
+private final class ReverseCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    func record() { lock.lock(); defer { lock.unlock() }; value += 1 }
+}
+
+private struct TailOnlyFormat: JournalFormat {
+    let calls: ReverseCalls
+    var agent: AgentKind { .cursor }
+    var missingIssue: String { "Missing fixture" }
+    func root(home: URL) -> URL { home }
+    func includes(_ components: [String]) -> Bool { true }
+    func makeSession(for file: URL, components: [String]) -> CodexSession { .init(id: "fixture", agent: .cursor) }
+    func initialState() {}
+    func apply(_ line: Data, to session: inout CodexSession, state: inout Void) {
+        if let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any], json["done"] as? Bool == true {
+            session.phase = .completed
+        }
+    }
+    func turnEvent(in line: Data) -> Bool? { calls.record(); return nil }
 }
