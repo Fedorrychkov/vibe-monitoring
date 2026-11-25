@@ -2,11 +2,11 @@
 
 **Your agents. One glance.**
 
-A native macOS menu bar app for observing local Codex sessions. See recent activity, recorded token usage and quota reports without opening every terminal or chat.
+A native macOS menu bar app for observing local Codex, Claude Code and Cursor agent sessions. See recent activity, recorded token usage and quota reports without opening every terminal or chat.
 
 ![VibeMonitoring components rendered with fictional demo data](docs/demo-preview.png)
 
-VibeMonitoring observes Codex locally and can connect to Quickping for read-only service monitoring. Quickping defaults to `https://quickping.tech`; self-hosted origins are supported. The server needs [the desktop integration endpoints](docs/quickping-integration.md).
+VibeMonitoring observes Codex, Claude Code and Cursor locally and can connect to Quickping for read-only service monitoring. Quickping defaults to `https://quickping.tech`; self-hosted origins are supported. The server needs [the desktop integration endpoints](docs/quickping-integration.md).
 
 An **experimental VPN candidate** adds subscription import, server selection and separate macOS packet-tunnel and experimental network-lock system extensions. It is not installed or activated by the normal build. Installation is gated on signing and provisioning, and on-device crash/leak checks remain outstanding. **Do not rely on the candidate for protection yet.** See [VPN setup and validation](docs/vpn.md).
 
@@ -25,7 +25,7 @@ An **experimental VPN candidate** adds subscription import, server selection and
 - Quickping service status, last check results, latency and open incident counts. Failed requests preserve previous results and mark them stale.
 - Optional Brave download/privacy-help links. No browser or personal browser profile is bundled or imported.
 
-Codex monitoring requires no account, API key or server. Quickping is optional. No third-party Swift package is required.
+Agent monitoring requires no account, API key or server. Quickping is optional. No third-party Swift package is required.
 
 ## Run
 
@@ -77,6 +77,15 @@ The reader examines the 40 most recently modified journal files. On first read i
 
 Codex's journal format is an internal format and can change. The parser supports the `session_meta`, `turn_context`, `event_msg` and `token_usage_record` structures observed in Codex 0.160–0.169 journals. Parser tests use synthetic examples, not exported user sessions.
 
+### Claude Code and Cursor
+
+Each agent can be turned off in Settings; a missing directory for an agent you do not use is not reported as a problem. Each source reads its own 40 most recent transcripts with the same bounded tail reader.
+
+- **Claude Code** — `~/.claude/projects/<project>/<session>.jsonl` (or `$CLAUDE_CONFIG_DIR`). A user prompt starts a turn; an assistant message with `end_turn` finishes it; `[Request interrupted…]` marks it interrupted; a pending `AskUserQuestion`/`ExitPlanMode` call or a `max_tokens`/`refusal` stop shows Needs attention. Local slash commands, meta records and subagent (sidechain) transcripts are not turns. Token totals are summed per API message (input includes cache reads and writes); on a long transcript only the read tail is summed and the card says so. Permission prompts are not recorded in the transcript, so they appear as a quiet active turn.
+- **Cursor** — `~/.cursor/projects/<workspace>/agent-transcripts/<id>/<id>.jsonl`. These lines have no timestamps, model or token counts. Status is inferred: a pending request or tool call is active; a reply followed by 20 s without writes, or a `turn_ended` record, is finished; an unanswered request quiet for 10 minutes shows No turn signal. The workspace folder name is resolved against existing directories.
+
+Both formats are internal and undocumented; they were checked against Claude Code and Cursor transcripts present in November 2026.
+
 ## Tokens and costs
 
 Token events are **cumulative snapshots**. They are replaced, not summed on every event. Cached input is part of input; reasoning tokens are part of output and are not added a second time.
@@ -87,7 +96,7 @@ Dollar costs are intentionally not inferred from a model name or subscription pl
 
 ## Privacy
 
-- Codex monitoring runs locally. No requests are made until Quickping is explicitly connected; saved Quickping connections resume polling every 30 seconds on launch.
+- Agent monitoring runs locally. No requests are made until Quickping is explicitly connected; saved Quickping connections resume polling every 30 seconds on launch.
 - Quickping authorization and monitoring contact only the selected server. API redirects are rejected, browser cookies are not copied into API requests, and the read-only token is stored in macOS Keychain. Disconnect removes local access and attempts server revocation; if offline, the app explains how to revoke it on the website.
 - No telemetry, analytics or crash-upload SDK.
 - `auth.json`, API keys and subscription links are not read.
@@ -105,6 +114,6 @@ Dollar costs are intentionally not inferred from a model name or subscription pl
 
 ## Contributing
 
-Small changes and synthetic regression tests are welcome. Do not attach real Codex logs, account data, auth files, VPN subscriptions or private project paths to issues or pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Small changes and synthetic regression tests are welcome. Do not attach real Codex, Claude Code or Cursor transcripts, account data, auth files, VPN subscriptions or private project paths to issues or pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 MIT licensed. Independent project, not affiliated with OpenAI.
