@@ -193,12 +193,14 @@ public struct NetworkLockHealth: Codable, Sendable {
 public struct NetworkLockBinding: Codable, Sendable {
     public let nodeID: String
     public let interface: String
-    public init(nodeID: String, interface: String) throws {
+    public let interfaceIndex: UInt32
+    public init(nodeID: String, interface: String, interfaceIndex: UInt32) throws {
         _ = try NetworkLockPolicy(mode: .protected, tunnelInterface: interface, nodeID: nodeID)
-        self.nodeID = nodeID; self.interface = interface
+        guard interfaceIndex > 0 else { throw VPNError.invalidConfiguration }
+        self.nodeID = nodeID; self.interface = interface; self.interfaceIndex = interfaceIndex
     }
     public func applying(to policy: NetworkLockPolicy) throws -> NetworkLockPolicy {
-        _ = try Self(nodeID: nodeID, interface: interface)
+        _ = try Self(nodeID: nodeID, interface: interface, interfaceIndex: interfaceIndex)
         guard policy.mode == .protected, policy.nodeID == nodeID else { throw VPNError.invalidConfiguration }
         return try .init(mode: .protected, endpoints: policy.endpoints, tunnelInterface: interface,
                          revision: policy.revision, nodeID: nodeID)

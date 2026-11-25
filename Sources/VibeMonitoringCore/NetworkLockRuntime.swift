@@ -14,6 +14,7 @@ public final class NetworkLockRuntime: @unchecked Sendable {
     private var preservedPolicyReloads = 0
     private var expiredBindings = 0
     private var boundUntil: UInt64 = 0
+    private var boundIndex: UInt32?
     private let lease: UInt64
     private let clock: @Sendable () -> UInt64
 
@@ -39,14 +40,18 @@ public final class NetworkLockRuntime: @unchecked Sendable {
                                    revision: $0.revision, nodeID: $0.nodeID)
         }
         rules = NetworkLockRules(current ?? (try! NetworkLockPolicy(mode: .paused)))
-        if rules.policy.tunnelInterface == nil { boundUntil = 0 }
+        if rules.policy.tunnelInterface == nil { boundUntil = 0; boundIndex = nil }
         self.active = active; valid = current != nil
     }
 
-    public func allows(interface: String, outbound: Bool, packet: UnsafeRawBufferPointer,
+    public func allows(interface: String, interfaceIndex: UInt32, outbound: Bool, packet: UnsafeRawBufferPointer,
                        linkLayer: NetworkLockLinkLayer) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if interface == rules.policy.tunnelInterface { expireBindingIfNeeded() }
+        if interface == rules.policy.tunnelInterface {
+            // A reused utun name must not inherit permission before its lease expires.
+            if boundIndex != interfaceIndex { discardBinding() }
+            else { expireBindingIfNeeded() }
+        }
         return rules.allows(interface: interface, outbound: outbound, bytes: packet, linkLayer: linkLayer)
     }
 
@@ -56,6 +61,7 @@ public final class NetworkLockRuntime: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard active, valid, let policy = try? binding.applying(to: rules.policy) else { return false }
         rules = NetworkLockRules(policy)
+        boundIndex = binding.interfaceIndex
         boundUntil = clock() &+ lease
         return true
     }
@@ -72,11 +78,17 @@ public final class NetworkLockRuntime: @unchecked Sendable {
     /// Caller holds `lock`.
     private func expireBindingIfNeeded() {
         let policy = rules.policy
-        guard policy.tunnelInterface != nil, clock() >= boundUntil,
-              let unbound = try? NetworkLockPolicy(mode: policy.mode, endpoints: policy.endpoints,
+        guard policy.tunnelInterface != nil, clock() >= boundUntil else { return }
+        discardBinding()
+        expiredBindings += 1
+    }
+
+    private func discardBinding() {
+        let policy = rules.policy
+        guard let unbound = try? NetworkLockPolicy(mode: policy.mode, endpoints: policy.endpoints,
                                                    revision: policy.revision, nodeID: policy.nodeID) else { return }
         rules = NetworkLockRules(unbound)
         boundUntil = 0
-        expiredBindings += 1
+        boundIndex = nil
     }
 }

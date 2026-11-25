@@ -2,6 +2,13 @@ import XCTest
 @testable import VibeMonitoringCore
 
 final class NetworkLockPolicyTests: XCTestCase {
+    func testBindingIndexIsRequiredAndValidatedAfterDecoding() throws {
+        let node = String(repeating: "a", count: 64)
+        XCTAssertThrowsError(try NetworkLockBinding(nodeID: node, interface: "utun7", interfaceIndex: 0))
+        let data = Data("{\"nodeID\":\"\(node)\",\"interface\":\"utun7\",\"interfaceIndex\":0}".utf8)
+        let decoded = try JSONDecoder().decode(NetworkLockBinding.self, from: data)
+        XCTAssertThrowsError(try decoded.applying(to: .init(mode: .protected, nodeID: node)))
+    }
     private func packet(ip: [UInt8] = [192, 0, 2, 1], port: Int = 443, proto: UInt8 = 6, inbound: Bool = false) -> Data {
         var data = [UInt8](repeating: 0, count: 40)
         data[0] = 0x45; data[3] = 40; data[9] = proto
@@ -78,14 +85,14 @@ final class NetworkLockPolicyTests: XCTestCase {
     func testProviderBindingRequiresSelectedNodeAndPreservesPolicyRevision() throws {
         let node = String(repeating: "a", count: 64)
         let policy = try NetworkLockPolicy(mode: .protected, endpoints: [.init(ip: "192.0.2.1", port: 443)], nodeID: node)
-        let binding = try NetworkLockBinding(nodeID: node, interface: "utun7")
+        let binding = try NetworkLockBinding(nodeID: node, interface: "utun7", interfaceIndex: 7)
         let updated = try binding.applying(to: policy)
         XCTAssertEqual(updated.revision, policy.revision)
         XCTAssertEqual(updated.tunnelInterface, "utun7")
         XCTAssertThrowsError(try binding.applying(to: .init(mode: .paused)))
         XCTAssertThrowsError(try binding.applying(to: .init(mode: .protected, nodeID: String(repeating: "b", count: 64))))
-        XCTAssertThrowsError(try NetworkLockBinding(nodeID: node, interface: "en0"))
-        XCTAssertThrowsError(try NetworkLockBinding(nodeID: "wrong", interface: "utun7"))
+        XCTAssertThrowsError(try NetworkLockBinding(nodeID: node, interface: "en0", interfaceIndex: 7))
+        XCTAssertThrowsError(try NetworkLockBinding(nodeID: "wrong", interface: "utun7", interfaceIndex: 7))
         XCTAssertThrowsError(try NetworkLockPolicy(mode: .protected, endpoints: Array(repeating: .init(ip: "192.0.2.1", port: 443), count: 33)))
         let malformed = Data("{\"mode\":\"protected\",\"endpoints\":[],\"revision\":\"\(UUID())\",\"tunnelInterface\":\"en0\"}".utf8)
         XCTAssertThrowsError(try NetworkLockPolicy.decode(malformed))

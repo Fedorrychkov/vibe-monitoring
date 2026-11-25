@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import VibeMonitoringCore
 
 final class LockStatusService: NSObject, NSXPCListenerDelegate, NetworkLockProtocol {
@@ -20,6 +21,7 @@ final class LockStatusService: NSObject, NSXPCListenerDelegate, NetworkLockProto
     }
     func bind(_ request: Data, reply: @escaping (Data?) -> Void) {
         guard request.count <= 1_024, let binding = try? JSONDecoder().decode(NetworkLockBinding.self, from: request),
+              if_nametoindex(binding.interface) == binding.interfaceIndex,
               LockRuntime.shared.bind(binding) else { reply(nil); return }
         reply(try? JSONEncoder().encode(LockRuntime.shared.health()))
     }

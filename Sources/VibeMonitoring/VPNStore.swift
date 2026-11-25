@@ -178,7 +178,7 @@ final class VPNStore: NSObject, ObservableObject, OSSystemExtensionRequestDelega
                 let health = try JSONDecoder().decode(VPNProviderHealth.self, from: reply)
                 guard health.nodeID == node.id, health.running, !health.reasserting,
                       let name = health.interfaceName, let policy = networkLock.policy else { throw VPNError.providerUnavailable }
-                let filter = try await NetworkLockClient.status(binding: .init(nodeID: node.id, interface: name))
+                let filter = try await NetworkLockClient.status(binding: NetworkLockClient.binding(nodeID: node.id, interface: name))
                 guard filter.confirms(policy), filter.tunnelInterface == name else { throw VPNError.providerUnavailable }
                 state = .connecting
             } catch {
