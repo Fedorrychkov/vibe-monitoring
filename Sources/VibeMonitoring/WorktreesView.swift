@@ -65,6 +65,13 @@ struct WorktreesView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let message = store.pruneMessage {
+                HStack {
+                    Label(message, systemImage: "info.circle").font(.caption).textSelection(.enabled)
+                    Spacer()
+                    Button { store.pruneMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                }.padding(.horizontal, 16).padding(.vertical, 8).background(.indigo.opacity(0.06))
+            }
             if !store.enabled {
                 placeholder("Worktree monitoring is off", "Turn it on in Settings › Agents.")
             } else if !store.hasScanned {
@@ -115,7 +122,7 @@ struct WorktreesView: View {
 
     private var footer: some View {
         HStack {
-            Text("Read only, except Prune, which removes git records of folders that no longer exist. Nothing is deleted from disk. \"Looks finished\" means clean, nothing unpushed and merged into the default branch (or the remote branch is gone); squash merges may not be detected.")
+            Text("Read only, except Prune, which removes git records of folders that no longer exist (after saving recovery branches for commits nothing else references). Nothing is deleted from disk. \"Looks finished\" means clean, no active session and contained in the default branch; squash merges are not detected.")
                 .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if store.hasScanned {
@@ -222,7 +229,10 @@ private struct WorktreeRow: View {
             if status.upstream == nil && worktree.entry.branch != nil && worktree.mergedIntoDefault != true {
                 chip("no upstream", .secondary)
             }
-            if status.upstreamGone { chip("remote branch gone", .teal) }
+            if status.upstreamGone {
+                if worktree.mergedIntoDefault == true { chip("remote branch deleted", .teal) }
+                else { chip("upstream deleted · publish state unknown", .orange, "questionmark") }
+            }
             if worktree.mergedIntoDefault == true { chip("merged", .teal, "checkmark") }
             if !status.isDirty && status.ahead == 0 && worktree.mergedIntoDefault != true && !status.upstreamGone {
                 chip("clean", .secondary)

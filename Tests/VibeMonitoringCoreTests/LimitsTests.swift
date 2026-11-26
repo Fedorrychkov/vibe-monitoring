@@ -128,4 +128,40 @@ final class LimitsTests: XCTestCase {
         XCTAssertThrowsError(try bridge.uninstall())
         XCTAssertEqual(try String(contentsOf: real, encoding: .utf8), "{ not json")
     }
+
+    func testParallelClaudeSessionsDoNotCollide() throws {
+        let bridge = bridge()
+        try bridge.install()
+        // Two concurrent writers, like two Claude Code sessions refreshing their status lines.
+        let script = """
+        for i in $(seq 1 60); do printf '%s' "$1" | \(bridge.command) || echo FAIL; done
+        """
+        let processes = try (0..<2).map { _ -> (Process, Pipe) in
+            let process = Process(), pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", script, "sh", statusLineInput]
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try process.run()
+            return (process, pipe)
+        }
+        for (process, pipe) in processes {
+            let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            XCTAssertEqual(text, "", "no mv errors or failures")
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        XCTAssertEqual(bridge.latestReport()?.windows.first?.usedPercent, 42.5)
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: bridge.supportDirectory.path)
+            .filter { $0.hasPrefix(".claude-statusline.") }
+        XCTAssertEqual(leftovers, [])
+    }
+
+    func testOutdatedBridgeScriptIsRewritten() throws {
+        let bridge = bridge()
+        try bridge.install()
+        try "#!/bin/sh\nold\n".write(to: bridge.scriptURL, atomically: true, encoding: .utf8)
+        bridge.updateScriptIfInstalled()
+        XCTAssertEqual(try String(contentsOf: bridge.scriptURL, encoding: .utf8), bridge.script)
+    }
 }

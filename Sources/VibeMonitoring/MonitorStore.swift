@@ -15,6 +15,7 @@ final class MonitorStore: ObservableObject {
     @Published var claudeLimits: AgentLimitReport?
     @Published var claudeBridgeInstalled = false
     @Published var limitsIssue: String?
+    var bridgeScriptChecked = false
     @Published private(set) var enabledAgents: Set<AgentKind>
     let isDemo: Bool
     let quickping: QuickpingStore

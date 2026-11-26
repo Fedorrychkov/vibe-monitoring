@@ -124,6 +124,13 @@ public struct ClaudeStatusLineBridge: Sendable {
         try save(settings)
     }
 
+    /// Rewrites an installed bridge script that was written by an older version of the app.
+    public func updateScriptIfInstalled() {
+        guard isInstalled, (try? String(contentsOf: scriptURL, encoding: .utf8)) != script else { return }
+        try? script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+    }
+
     /// Restores the previous status line command (or removes the entry) and deletes the bridge files.
     public func uninstall() throws {
         var settings = try loadSettings()
@@ -154,8 +161,11 @@ public struct ClaudeStatusLineBridge: Sendable {
         input=$(cat)
         case "$input" in
           *'"rate_limits"'*)
-            umask 077
-            printf '%s' "$input" > "$dir/claude-statusline.json.tmp" && mv -f "$dir/claude-statusline.json.tmp" "$dir/claude-statusline.json"
+            # A unique temp file per run: parallel Claude Code sessions never share one, and rename is atomic.
+            # A failure here must not skip the previous status line below.
+            if tmp=$(mktemp "$dir/.claude-statusline.XXXXXX"); then
+              if printf '%s' "$input" > "$tmp" && mv -f "$tmp" "$dir/claude-statusline.json"; then :; else rm -f "$tmp"; fi
+            fi
             ;;
         esac
         if [ -f "$dir/claude-statusline-previous.sh" ]; then

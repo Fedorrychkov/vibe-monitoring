@@ -43,6 +43,7 @@ final class WorktreeStore: ObservableObject {
         guard enabled, !isDemo, !isScanning else { return }
         if !force, let lastScan, Date().timeIntervalSince(lastScan) < interval { return }
         isScanning = true
+        if force { await scanner.forgetDiscovery() }
         defer { isScanning = false }
         snapshot = await scanner.scan(sessions: sessions)
         lastScan = Date()
@@ -87,36 +88,53 @@ final class WorktreeStore: ObservableObject {
         return values.isEmpty ? nil : values.reduce(0, +)
     }
 
-    /// Shows git's own dry-run list, then removes only records of folders that no longer exist.
+    /// Shows git's dry-run list. Records that are the last reference to commits get recovery branches first;
+    /// the core re-checks this right before pruning and refuses otherwise.
     func prune(_ repository: WorktreeRepository, sessions: [CodexSession]) {
         guard !isDemo else { return }
         Task {
-            let preview = await scanner.prunePreview(commonDir: repository.commonDir)
+            let plan = await scanner.prunePlan(commonDir: repository.commonDir)
             let alert = NSAlert()
-            if preview.isEmpty {
+            NSApp.activate(ignoringOtherApps: true)
+            if plan.records.isEmpty {
                 alert.messageText = "Nothing to prune in \(repository.name)"
                 alert.informativeText = "git reports no worktree records with missing folders. Locked worktrees are never pruned."
                 alert.addButton(withTitle: "OK")
-                NSApp.activate(ignoringOtherApps: true)
                 alert.runModal()
                 return
             }
-            alert.messageText = "Prune \(preview.count) worktree record\(preview.count == 1 ? "" : "s") in \(repository.name)?"
-            let listed = preview.prefix(12).joined(separator: "\n")
-            alert.informativeText = """
-            Runs git worktree prune. Only git's records of folders that no longer exist are removed; \
-            no files on disk and no branches or commits are deleted, and the branches become available for checkout again.
-
-            \(listed)\(preview.count > 12 ? "\n…and \(preview.count - 12) more" : "")
+            let count = plan.records.count
+            alert.messageText = "Prune \(count) worktree record\(count == 1 ? "" : "s") in \(repository.name)?"
+            var text = """
+            Runs git worktree prune: removes git's records of worktree folders that no longer exist. \
+            No files on disk are touched and existing branches stay; their names become available for checkout again.
             """
-            alert.addButton(withTitle: "Prune")
+            if !plan.unreferenced.isEmpty {
+                let names = plan.unreferenced.prefix(8).map { "• \($0.suggestedBranch)" }.joined(separator: "\n")
+                text += """
+
+
+                \(plan.unreferenced.count) of them hold the only reference to their commits (detached HEAD). \
+                Without a branch, a later git gc may delete those commits. Recovery branches will be created first:
+                \(names)\(plan.unreferenced.count > 8 ? "\n…and \(plan.unreferenced.count - 8) more" : "")
+                """
+            }
+            text += "\n\n" + plan.records.prefix(12).joined(separator: "\n") + (count > 12 ? "\n…and \(count - 12) more" : "")
+            alert.informativeText = text
+            alert.addButton(withTitle: plan.unreferenced.isEmpty ? "Prune" : "Save recovery branches and prune")
             alert.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
             guard alert.runModal() == .alertFirstButtonReturn else { return }
-            await scanner.prune(commonDir: repository.commonDir)
+            do {
+                let created = try await scanner.prune(commonDir: repository.commonDir, saving: plan.unreferenced)
+                pruneMessage = created.isEmpty ? nil : "Created \(created.count) recovery branch\(created.count == 1 ? "" : "es") in \(repository.name): \(created.joined(separator: ", "))"
+            } catch {
+                pruneMessage = error.localizedDescription
+            }
             await refreshIfDue(sessions: sessions, force: true)
         }
     }
+
+    @Published var pruneMessage: String?
 
     // MARK: - Opening
 

@@ -40,6 +40,10 @@ extension MonitorStore {
         if isDemo { claudeLimits = DemoData.limits().first { $0.agent == .claude }; claudeBridgeInstalled = true; return }
         let bridge = ClaudeStatusLineBridge()
         claudeBridgeInstalled = bridge.isInstalled
+        if claudeBridgeInstalled && !bridgeScriptChecked {
+            bridge.updateScriptIfInstalled()
+            bridgeScriptChecked = true
+        }
         claudeLimits = bridge.latestReport()
     }
 }

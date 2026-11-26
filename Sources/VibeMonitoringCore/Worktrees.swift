@@ -166,11 +166,43 @@ public struct AgentWorktree: Identifiable, Sendable {
         [lastCommitAt, lastTouchedAt].compactMap { $0 }.max()
     }
 
-    /// No uncommitted work, nothing unpushed and already in the default branch (or the remote branch is gone).
+    /// No uncommitted work, no active session and HEAD already contained in the default branch.
+    /// A deleted upstream alone is not enough: git then reports no ahead count, so unpublished commits are unknown.
     public var looksFinished: Bool {
-        guard !isMain, !entry.isPrunable, let status, !status.isDirty, activeSessions == 0 else { return false }
-        if mergedIntoDefault == true { return status.ahead == 0 || status.upstream == nil }
-        return status.upstreamGone && status.ahead == 0
+        guard !isMain, !entry.isPrunable, let status, !status.isDirty, activeSessions == 0,
+              mergedIntoDefault == true else { return false }
+        return status.upstreamGone || status.upstream == nil || status.ahead == 0
+    }
+}
+
+/// A missing worktree whose HEAD is the only reference to its commits.
+public struct UnreferencedHead: Equatable, Sendable {
+    public var path: String
+    public var head: String
+    public var branch: String?
+
+    public init(path: String, head: String, branch: String? = nil) {
+        self.path = path
+        self.head = head
+        self.branch = branch
+    }
+
+    /// e.g. `recovery/orbit-review-42-0123abcd`
+    public var suggestedBranch: String {
+        let folder = URL(fileURLWithPath: path).lastPathComponent
+        let safe = folder.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "-" }
+        let trimmed = String(safe).trimmingCharacters(in: CharacterSet(charactersIn: "-_."))
+        return "recovery/\(trimmed.isEmpty ? "worktree" : String(trimmed.prefix(60)))-\(head.prefix(8))"
+    }
+}
+
+public struct PrunePlan: Sendable {
+    public var records: [String]
+    public var unreferenced: [UnreferencedHead]
+
+    public init(records: [String], unreferenced: [UnreferencedHead]) {
+        self.records = records
+        self.unreferenced = unreferenced
     }
 }
 

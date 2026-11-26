@@ -66,8 +66,11 @@ private final class Flag: @unchecked Sendable {
 public actor WorktreeScanner {
     private let git: GitRunner
     private let fileManager = FileManager.default
+    private struct Discovery { var commonDir: String?; var checkedAt: Date }
     /// Seed folder → shared git directory, so unchanged seeds cost no git call on later scans.
-    private var commonDirs: [String: String?] = [:]
+    private var commonDirs: [String: Discovery] = [:]
+    /// A folder found outside any repository is retried after this long (it may be `git init`ed later).
+    public static let negativeDiscoveryLifetime: TimeInterval = 300
 
     public init(git: GitRunner = GitRunner()) { self.git = git }
 
@@ -85,7 +88,7 @@ public actor WorktreeScanner {
 
         var repositories: [String: Bool] = [:]
         for seed in seeds.sorted() {
-            guard let common = await commonDir(for: seed) else { continue }
+            guard let common = await commonDir(for: seed, now: now) else { continue }
             repositories[common] = true
         }
 
@@ -103,6 +106,71 @@ public actor WorktreeScanner {
                                 issue: failed > 0 ? "\(failed) repositor\(failed == 1 ? "y" : "ies") could not be read." : nil)
     }
 
+    /// What a prune would do: git's dry-run list, plus records whose HEAD is the only reference to its commits.
+    public func prunePlan(commonDir: String) async -> PrunePlan {
+        PrunePlan(records: await prunePreview(commonDir: commonDir),
+                  unreferenced: await unreferencedHeads(commonDir: commonDir))
+    }
+
+    /// Prunable records whose HEAD commit is not contained in any branch, tag or remote ref. Pruning such a record
+    /// drops the last reference, and a later `git gc` may delete those commits.
+    public func unreferencedHeads(commonDir: String) async -> [UnreferencedHead] {
+        let list = await git.run(["--git-dir=\(commonDir)", "worktree", "list", "--porcelain"])
+        guard list.status == 0 else { return [] }
+        var result: [UnreferencedHead] = []
+        for entry in WorktreeEntry.parse(porcelain: list.output) where entry.isPrunable && !entry.isLocked {
+            guard let head = entry.head, !head.allSatisfy({ $0 == "0" }) else { continue }
+            let refs = await git.run(["--git-dir=\(commonDir)", "for-each-ref", "--contains", head,
+                                      "--count=1", "--format=%(refname)"])
+            // Unknown (failed) is treated as unreferenced: the safe answer is to offer a branch.
+            if refs.status == 0, !refs.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            result.append(UnreferencedHead(path: entry.path, head: head, branch: entry.branch))
+        }
+        return result
+    }
+
+    public enum PruneError: LocalizedError, Equatable {
+        case unreferencedCommits(Int)
+        case branchFailed(String)
+        case pruneFailed
+
+        public var errorDescription: String? {
+            switch self {
+            case .unreferencedCommits(let count):
+                return "\(count) missing worktree\(count == 1 ? " holds" : "s hold") the only reference to commits. Nothing was pruned."
+            case .branchFailed(let name): return "Recovery branch \(name) could not be created. Nothing was pruned."
+            case .pruneFailed: return "git worktree prune failed."
+            }
+        }
+    }
+
+    /// Creates recovery branches for `saving`, then prunes — but only if no record would still be the last
+    /// reference to its commits (re-checked right before pruning). Returns the branches created.
+    public func prune(commonDir: String, saving: [UnreferencedHead]) async throws -> [String] {
+        var created: [String] = []
+        for item in saving {
+            let name = await availableBranchName(commonDir: commonDir, base: item.suggestedBranch)
+            let result = await git.run(["--git-dir=\(commonDir)", "branch", name, item.head])
+            guard result.status == 0 else { throw PruneError.branchFailed(name) }
+            created.append(name)
+        }
+        let remaining = await unreferencedHeads(commonDir: commonDir)
+        guard remaining.isEmpty else { throw PruneError.unreferencedCommits(remaining.count) }
+        guard await git.run(["--git-dir=\(commonDir)", "worktree", "prune", "--verbose"]).status == 0 else {
+            throw PruneError.pruneFailed
+        }
+        return created
+    }
+
+    private func availableBranchName(commonDir: String, base: String) async -> String {
+        for suffix in 0..<50 {
+            let name = suffix == 0 ? base : "\(base)-\(suffix + 1)"
+            let exists = await git.run(["--git-dir=\(commonDir)", "rev-parse", "--verify", "--quiet", "refs/heads/\(name)"])
+            if exists.status != 0 { return name }
+        }
+        return "\(base)-\(UUID().uuidString.prefix(8))"
+    }
+
     /// Shows what `git worktree prune` would remove, without removing anything.
     public func prunePreview(commonDir: String) async -> [String] {
         let result = await git.run(["--git-dir=\(commonDir)", "worktree", "prune", "--dry-run", "--verbose"], includeErrors: true)
@@ -110,13 +178,6 @@ public actor WorktreeScanner {
         return result.output.split(separator: "\n").map { line in
             line.hasPrefix("Removing ") ? String(line.dropFirst("Removing ".count)) : String(line)
         }
-    }
-
-    /// Removes administrative records of worktrees whose folders no longer exist. Never touches files on disk
-    /// and skips locked worktrees.
-    @discardableResult
-    public func prune(commonDir: String) async -> Bool {
-        await git.run(["--git-dir=\(commonDir)", "worktree", "prune", "--verbose"]).status == 0
     }
 
     /// Disk usage in bytes. `du` can take a while on large dependency folders, so this is on demand only.
@@ -149,15 +210,24 @@ public actor WorktreeScanner {
         return found
     }
 
-    private func commonDir(for seed: String) async -> String? {
-        if let cached = commonDirs[seed] { return cached }
+    /// Forgets repository discovery so the next scan re-resolves every folder (manual refresh).
+    public func forgetDiscovery() { commonDirs.removeAll() }
+
+    private func commonDir(for seed: String, now: Date) async -> String? {
+        if let cached = commonDirs[seed] {
+            if let common = cached.commonDir, fileManager.fileExists(atPath: common) { return common }
+            // A negative result expires so a later `git init` is noticed; a vanished repository is re-resolved.
+            if cached.commonDir == nil, now.timeIntervalSince(cached.checkedAt) < Self.negativeDiscoveryLifetime { return nil }
+        }
         var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: seed, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+        guard fileManager.fileExists(atPath: seed, isDirectory: &isDirectory), isDirectory.boolValue else {
+            commonDirs[seed] = nil
+            return nil
+        }
         let result = await git.run(["-C", seed, "rev-parse", "--path-format=absolute", "--git-common-dir"])
         let value = result.status == 0 ? result.output.trimmingCharacters(in: .whitespacesAndNewlines) : ""
         let common = value.isEmpty ? nil : URL(fileURLWithPath: value).standardizedFileURL.path
-        // A folder outside any repository is cached as nil; it is not retried every minute.
-        commonDirs[seed] = .some(common)
+        commonDirs[seed] = Discovery(commonDir: common, checkedAt: now)
         return common
     }
 

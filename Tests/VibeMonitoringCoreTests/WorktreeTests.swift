@@ -88,8 +88,16 @@ final class WorktreeTests: XCTestCase {
         worktree.status = WorktreeStatus()
         worktree.mergedIntoDefault = false
         XCTAssertFalse(worktree.looksFinished)
+        // A deleted upstream hides the ahead count: unmerged work is not "finished".
         worktree.status?.upstreamGone = true
+        XCTAssertFalse(worktree.looksFinished)
+        worktree.mergedIntoDefault = true
         XCTAssertTrue(worktree.looksFinished)
+    }
+
+    func testSuggestedRecoveryBranchIsAValidName() {
+        let item = UnreferencedHead(path: "/private/tmp/eg review 1267.gWiaJb", head: "b3e282c6aaaaaaaa")
+        XCTAssertEqual(item.suggestedBranch, "recovery/eg-review-1267-gWiaJb-b3e282c6")
     }
 
     // MARK: - Real git
@@ -147,10 +155,12 @@ final class WorktreeTests: XCTestCase {
         XCTAssertEqual(byBranch["feat/gone"]?.entry.isPrunable, true)
         XCTAssertNotNil(byBranch["codex/done"]?.lastActivity)
 
-        let preview = await scanner.prunePreview(commonDir: repository.commonDir)
-        XCTAssertEqual(preview.count, 1)
-        let pruned = await scanner.prune(commonDir: repository.commonDir)
-        XCTAssertTrue(pruned)
+        let plan = await scanner.prunePlan(commonDir: repository.commonDir)
+        XCTAssertEqual(plan.records.count, 1)
+        // feat/gone still exists as a branch, so nothing needs saving.
+        XCTAssertEqual(plan.unreferenced, [])
+        let created = try await scanner.prune(commonDir: repository.commonDir, saving: plan.unreferenced)
+        XCTAssertEqual(created, [])
         let after = await scanner.scan(sessions: [session], roots: [agentRoot])
         XCTAssertEqual(after.repositories.first?.linked.count, 2)
         XCTAssertEqual(after.prunableCount, 0)
@@ -159,5 +169,93 @@ final class WorktreeTests: XCTestCase {
 
         let sizes = await scanner.diskUsage(paths: [merged.path])
         XCTAssertGreaterThan(sizes[merged.path] ?? 0, 0)
+    }
+
+    private func output(_ arguments: String..., in directory: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", directory.path] + arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func makeRepository(at repo: URL) throws {
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try git("init", "-q", "-b", "main", in: repo)
+        try "a".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try git("add", ".", in: repo)
+        try git("commit", "-q", "-m", "init", in: repo)
+    }
+
+    func testPruneKeepsCommitsOnlyReferencedByMissingDetachedWorktree() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent("app")
+        try makeRepository(at: repo)
+        let review = base.appendingPathComponent("review 1")
+        try git("worktree", "add", "-q", "--detach", review.path, in: repo)
+        try "b".write(to: review.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+        try git("add", ".", in: review)
+        try git("commit", "-q", "-m", "only here", in: review)
+        let head = try output("rev-parse", "HEAD", in: review)
+        try FileManager.default.removeItem(at: review)
+
+        let scanner = WorktreeScanner()
+        let common = repo.appendingPathComponent(".git").path
+        let plan = await scanner.prunePlan(commonDir: common)
+        XCTAssertEqual(plan.records.count, 1)
+        XCTAssertEqual(plan.unreferenced.map(\.head), [head])
+
+        // Pruning without saving is refused and leaves the record (and its reference) in place.
+        do {
+            _ = try await scanner.prune(commonDir: common, saving: [])
+            XCTFail("prune should refuse")
+        } catch let error as WorktreeScanner.PruneError {
+            XCTAssertEqual(error, .unreferencedCommits(1))
+        }
+        let stillListed = await scanner.prunePlan(commonDir: common)
+        XCTAssertEqual(stillListed.records.count, 1)
+
+        // An existing branch with the suggested name is not overwritten.
+        try git("branch", plan.unreferenced[0].suggestedBranch, "main", in: repo)
+        let created = try await scanner.prune(commonDir: common, saving: plan.unreferenced)
+        XCTAssertEqual(created, [plan.unreferenced[0].suggestedBranch + "-2"])
+        XCTAssertEqual(try output("rev-parse", created[0], in: repo), head)
+        let after = await scanner.prunePlan(commonDir: common)
+        XCTAssertEqual(after.records, [])
+    }
+
+    func testFolderInitializedLaterIsDiscovered() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let folder = base.appendingPathComponent("later")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let scanner = WorktreeScanner()
+        let start = Date()
+        let before = await scanner.scan(sessions: [], roots: [], extraSeeds: [folder.path], now: start)
+        XCTAssertEqual(before.repositories.count, 0)
+        try FileManager.default.removeItem(at: folder)
+        try makeRepository(at: folder)
+
+        let cached = await scanner.scan(sessions: [], roots: [], extraSeeds: [folder.path], now: start.addingTimeInterval(10))
+        XCTAssertEqual(cached.repositories.count, 0, "negative result is cached briefly")
+        let expired = await scanner.scan(sessions: [], roots: [], extraSeeds: [folder.path],
+                                         now: start.addingTimeInterval(WorktreeScanner.negativeDiscoveryLifetime + 1))
+        XCTAssertEqual(expired.repositories.count, 1)
+
+        let fresh = WorktreeScanner()
+        let other = base.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        _ = await fresh.scan(sessions: [], roots: [], extraSeeds: [other.path], now: start)
+        try FileManager.default.removeItem(at: other)
+        try makeRepository(at: other)
+        await fresh.forgetDiscovery()
+        let manual = await fresh.scan(sessions: [], roots: [], extraSeeds: [other.path], now: start.addingTimeInterval(1))
+        XCTAssertEqual(manual.repositories.count, 1, "manual refresh re-resolves at once")
     }
 }
