@@ -12,7 +12,7 @@ The current binary architecture is **Apple silicon (arm64)**, requiring macOS 13
 
 Before replacing an existing experimental VPN build, choose **Allow direct Internet** and verify that your network works through your chosen connection. Wait for the app to finish before enabling Happ or another VPN. Updating the app/components can interrupt an active tunnel; do not update while relying on it.
 
-**0.3.11 is an experimental candidate.** It adds Claude Code/Cursor monitoring and network-lock hardening. Earlier versions experienced intermittent TLS stalls and a recovery failure requiring a reboot. Crash, handoff and explicit filter disablement still need device validation. Signing/notarization does not certify VPN privacy, absence of leaks or successful recovery.
+**0.3.12 is an experimental candidate.** It adds agent worktrees, recovery branches before pruning unreferenced worktree commits, Codex usage reports and an optional Claude Code status line bridge. Cursor usage remains unavailable without reading its sign-in token, which the app does not do. The VPN/lock implementation is unchanged from 0.3.11; bundle versions advance to build 17 for distribution. Earlier versions experienced intermittent TLS stalls and a recovery failure requiring a reboot. Crash, handoff and explicit filter disablement still need device validation. Signing/notarization does not certify VPN privacy, absence of leaks or successful recovery.
 
 ## Build the monitoring app yourself
 
@@ -21,7 +21,7 @@ Install Xcode or Command Line Tools providing Swift 5.9+, then check out the rel
 ```sh
 git clone https://github.com/Fedorrychkov/vibe-monitoring.git
 cd vibe-monitoring
-git checkout v0.3.11
+git checkout v0.3.12
 swift test
 bash scripts/build-app.sh
 open dist/VibeMonitoring.app
