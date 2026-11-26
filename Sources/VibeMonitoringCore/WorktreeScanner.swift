@@ -107,16 +107,18 @@ public actor WorktreeScanner {
     }
 
     /// What a prune would do: git's dry-run list, plus records whose HEAD is the only reference to its commits.
-    public func prunePlan(commonDir: String) async -> PrunePlan {
-        PrunePlan(records: await prunePreview(commonDir: commonDir),
-                  unreferenced: await unreferencedHeads(commonDir: commonDir))
+    /// Throws when git cannot answer; callers must not prune on an unknown state.
+    public func prunePlan(commonDir: String) async throws -> PrunePlan {
+        PrunePlan(records: try await prunePreview(commonDir: commonDir),
+                  unreferenced: try await unreferencedHeads(commonDir: commonDir))
     }
 
     /// Prunable records whose HEAD commit is not contained in any branch, tag or remote ref. Pruning such a record
     /// drops the last reference, and a later `git gc` may delete those commits.
-    public func unreferencedHeads(commonDir: String) async -> [UnreferencedHead] {
+    /// A failed or timed-out listing throws: "no records found" must never stand in for "could not check".
+    public func unreferencedHeads(commonDir: String) async throws -> [UnreferencedHead] {
         let list = await git.run(["--git-dir=\(commonDir)", "worktree", "list", "--porcelain"])
-        guard list.status == 0 else { return [] }
+        guard list.status == 0, !list.timedOut else { throw PruneError.checkFailed }
         var result: [UnreferencedHead] = []
         for entry in WorktreeEntry.parse(porcelain: list.output) where entry.isPrunable && !entry.isLocked {
             guard let head = entry.head, !head.allSatisfy({ $0 == "0" }) else { continue }
@@ -133,6 +135,7 @@ public actor WorktreeScanner {
         case unreferencedCommits(Int)
         case branchFailed(String)
         case pruneFailed
+        case checkFailed
 
         public var errorDescription: String? {
             switch self {
@@ -140,6 +143,7 @@ public actor WorktreeScanner {
                 return "\(count) missing worktree\(count == 1 ? " holds" : "s hold") the only reference to commits. Nothing was pruned."
             case .branchFailed(let name): return "Recovery branch \(name) could not be created. Nothing was pruned."
             case .pruneFailed: return "git worktree prune failed."
+            case .checkFailed: return "git could not list worktrees to check for unreferenced commits. Nothing was pruned."
             }
         }
     }
@@ -154,7 +158,7 @@ public actor WorktreeScanner {
             guard result.status == 0 else { throw PruneError.branchFailed(name) }
             created.append(name)
         }
-        let remaining = await unreferencedHeads(commonDir: commonDir)
+        let remaining = try await unreferencedHeads(commonDir: commonDir)
         guard remaining.isEmpty else { throw PruneError.unreferencedCommits(remaining.count) }
         guard await git.run(["--git-dir=\(commonDir)", "worktree", "prune", "--verbose"]).status == 0 else {
             throw PruneError.pruneFailed
@@ -172,9 +176,9 @@ public actor WorktreeScanner {
     }
 
     /// Shows what `git worktree prune` would remove, without removing anything.
-    public func prunePreview(commonDir: String) async -> [String] {
+    public func prunePreview(commonDir: String) async throws -> [String] {
         let result = await git.run(["--git-dir=\(commonDir)", "worktree", "prune", "--dry-run", "--verbose"], includeErrors: true)
-        guard result.status == 0 else { return [] }
+        guard result.status == 0, !result.timedOut else { throw PruneError.checkFailed }
         return result.output.split(separator: "\n").map { line in
             line.hasPrefix("Removing ") ? String(line.dropFirst("Removing ".count)) : String(line)
         }

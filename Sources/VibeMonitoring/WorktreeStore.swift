@@ -93,9 +93,16 @@ final class WorktreeStore: ObservableObject {
     func prune(_ repository: WorktreeRepository, sessions: [CodexSession]) {
         guard !isDemo else { return }
         Task {
-            let plan = await scanner.prunePlan(commonDir: repository.commonDir)
             let alert = NSAlert()
             NSApp.activate(ignoringOtherApps: true)
+            let plan: PrunePlan
+            do { plan = try await scanner.prunePlan(commonDir: repository.commonDir) } catch {
+                alert.messageText = "Cannot prune \(repository.name)"
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                return
+            }
             if plan.records.isEmpty {
                 alert.messageText = "Nothing to prune in \(repository.name)"
                 alert.informativeText = "git reports no worktree records with missing folders. Locked worktrees are never pruned."

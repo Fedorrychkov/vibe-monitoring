@@ -155,7 +155,7 @@ final class WorktreeTests: XCTestCase {
         XCTAssertEqual(byBranch["feat/gone"]?.entry.isPrunable, true)
         XCTAssertNotNil(byBranch["codex/done"]?.lastActivity)
 
-        let plan = await scanner.prunePlan(commonDir: repository.commonDir)
+        let plan = try await scanner.prunePlan(commonDir: repository.commonDir)
         XCTAssertEqual(plan.records.count, 1)
         // feat/gone still exists as a branch, so nothing needs saving.
         XCTAssertEqual(plan.unreferenced, [])
@@ -207,7 +207,7 @@ final class WorktreeTests: XCTestCase {
 
         let scanner = WorktreeScanner()
         let common = repo.appendingPathComponent(".git").path
-        let plan = await scanner.prunePlan(commonDir: common)
+        let plan = try await scanner.prunePlan(commonDir: common)
         XCTAssertEqual(plan.records.count, 1)
         XCTAssertEqual(plan.unreferenced.map(\.head), [head])
 
@@ -218,7 +218,7 @@ final class WorktreeTests: XCTestCase {
         } catch let error as WorktreeScanner.PruneError {
             XCTAssertEqual(error, .unreferencedCommits(1))
         }
-        let stillListed = await scanner.prunePlan(commonDir: common)
+        let stillListed = try await scanner.prunePlan(commonDir: common)
         XCTAssertEqual(stillListed.records.count, 1)
 
         // An existing branch with the suggested name is not overwritten.
@@ -226,7 +226,7 @@ final class WorktreeTests: XCTestCase {
         let created = try await scanner.prune(commonDir: common, saving: plan.unreferenced)
         XCTAssertEqual(created, [plan.unreferenced[0].suggestedBranch + "-2"])
         XCTAssertEqual(try output("rev-parse", created[0], in: repo), head)
-        let after = await scanner.prunePlan(commonDir: common)
+        let after = try await scanner.prunePlan(commonDir: common)
         XCTAssertEqual(after.records, [])
     }
 
@@ -257,5 +257,48 @@ final class WorktreeTests: XCTestCase {
         await fresh.forgetDiscovery()
         let manual = await fresh.scan(sessions: [], roots: [], extraSeeds: [other.path], now: start.addingTimeInterval(1))
         XCTAssertEqual(manual.repositories.count, 1, "manual refresh re-resolves at once")
+    }
+
+    func testFailedCheckRefusesPruneAndKeepsReference() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent("app")
+        try makeRepository(at: repo)
+        let review = base.appendingPathComponent("review")
+        try git("worktree", "add", "-q", "--detach", review.path, in: repo)
+        try "b".write(to: review.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+        try git("add", ".", in: review)
+        try git("commit", "-q", "-m", "only here", in: review)
+        let head = try output("rev-parse", "HEAD", in: review)
+        try FileManager.default.removeItem(at: review)
+
+        // A git wrapper whose `worktree list` fails while every other command works.
+        let wrapper = base.appendingPathComponent("git-failing-list")
+        try """
+        #!/bin/sh
+        if [ "$2" = "worktree" ] && [ "$3" = "list" ]; then exit 128; fi
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+
+        let common = repo.appendingPathComponent(".git").path
+        let failing = WorktreeScanner(git: GitRunner(executable: wrapper.path))
+        do {
+            _ = try await failing.prune(commonDir: common, saving: [])
+            XCTFail("prune must refuse when the check fails")
+        } catch let error as WorktreeScanner.PruneError {
+            XCTAssertEqual(error, .checkFailed)
+        }
+        do {
+            _ = try await failing.prunePlan(commonDir: common)
+            XCTFail("plan must report the failed check")
+        } catch let error as WorktreeScanner.PruneError {
+            XCTAssertEqual(error, .checkFailed)
+        }
+
+        // The record, and with it the only reference to the commit, is still there.
+        let plan = try await WorktreeScanner().prunePlan(commonDir: common)
+        XCTAssertEqual(plan.records.count, 1)
+        XCTAssertEqual(plan.unreferenced.map(\.head), [head])
     }
 }
