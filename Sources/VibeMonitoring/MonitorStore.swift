@@ -12,10 +12,15 @@ final class MonitorStore: ObservableObject {
     @Published var notifyOnFinish: Bool
     @Published var notificationIssue: String?
     @Published var agentFilter: AgentKind?
+    @Published var claudeLimits: AgentLimitReport?
+    @Published var claudeBridgeInstalled = false
+    @Published var limitsIssue: String?
+    var bridgeScriptChecked = false
     @Published private(set) var enabledAgents: Set<AgentKind>
     let isDemo: Bool
     let quickping: QuickpingStore
     let vpn: VPNStore
+    let worktrees: WorktreeStore
     private let scanner = CodexScanner()
     private let claudeScanner = ClaudeScanner(format: ClaudeJournalFormat())
     private let cursorScanner = CursorScanner(format: CursorJournalFormat())
@@ -25,6 +30,7 @@ final class MonitorStore: ObservableObject {
         isDemo = demo
         quickping = QuickpingStore(demo: demo)
         vpn = VPNStore(demo: demo)
+        worktrees = WorktreeStore(demo: demo)
         codexHome = UserDefaults.standard.string(forKey: "codexHome") ?? CodexScanner.defaultHome().path
         notifyOnFinish = UserDefaults.standard.bool(forKey: "notifyOnFinish")
         let disabled = Set((UserDefaults.standard.stringArray(forKey: "disabledAgents") ?? []).compactMap(AgentKind.init(rawValue:)))
@@ -67,7 +73,7 @@ final class MonitorStore: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
-        if isDemo { snapshot = DemoData.snapshot(); return }
+        if isDemo { snapshot = DemoData.snapshot(); refreshClaudeLimits(); return }
         let home = URL(fileURLWithPath: NSString(string: codexHome).expandingTildeInPath)
         let previous = Dictionary(snapshot.sessions.map { ($0.identity, $0) }, uniquingKeysWith: { _, last in last })
         var parts: [ScanSnapshot] = []
@@ -78,6 +84,8 @@ final class MonitorStore: ObservableObject {
         let customHome = UserDefaults.standard.string(forKey: "codexHome") != nil
         let next = ScanSnapshot.merged(parts, reportMissing: customHome ? [.codex] : [])
         snapshot = next
+        if enabledAgents.contains(.claude) { refreshClaudeLimits() }
+        Task { [worktrees] in await worktrees.refreshIfDue(sessions: next.sessions) }
         guard notifyOnFinish else { return }
         for session in next.sessions where session.phase == .completed {
             guard previous[session.identity]?.phase == .running,

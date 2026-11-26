@@ -1,0 +1,304 @@
+import Foundation
+import XCTest
+@testable import VibeMonitoringCore
+
+final class WorktreeTests: XCTestCase {
+    func testParsesPorcelainRecords() {
+        let text = """
+        worktree /demo/app
+        HEAD 1111111111111111111111111111111111111111
+        branch refs/heads/main
+
+        worktree /demo/home/.codex/worktrees/fix/app
+        HEAD 2222222222222222222222222222222222222222
+        branch refs/heads/codex/fix
+        locked agent is working
+
+        worktree /tmp/review
+        HEAD 3333333333333333333333333333333333333333
+        detached
+        prunable gitdir file points to non-existent location
+
+        """
+        let entries = WorktreeEntry.parse(porcelain: text)
+        XCTAssertEqual(entries.count, 3)
+        XCTAssertEqual(entries[0].branch, "main")
+        XCTAssertEqual(entries[1].branch, "codex/fix")
+        XCTAssertTrue(entries[1].isLocked)
+        XCTAssertEqual(entries[1].lockedReason, "agent is working")
+        XCTAssertTrue(entries[2].isDetached)
+        XCTAssertNil(entries[2].branch)
+        XCTAssertTrue(entries[2].isPrunable)
+    }
+
+    func testParsesBranchStatus() {
+        var status = WorktreeStatus.parse("## feat/x...origin/feat/x [ahead 2, behind 1]\n M a.swift\nA  b.swift\n?? c.txt\n")
+        XCTAssertEqual(status.upstream, "origin/feat/x")
+        XCTAssertEqual(status.ahead, 2)
+        XCTAssertEqual(status.behind, 1)
+        XCTAssertEqual(status.changedFiles, 2)
+        XCTAssertEqual(status.untrackedFiles, 1)
+        XCTAssertTrue(status.isDirty)
+
+        status = WorktreeStatus.parse("## docs/y...origin/docs/y [gone]\n")
+        XCTAssertTrue(status.upstreamGone)
+        XCTAssertFalse(status.isDirty)
+
+        status = WorktreeStatus.parse("## HEAD (no branch)\n")
+        XCTAssertNil(status.upstream)
+        XCTAssertEqual(status.ahead, 0)
+    }
+
+    func testInfersOwnerFromPathThenBranch() {
+        XCTAssertEqual(WorktreeOwner.infer(path: "/Users/a/.codex/worktrees/x/app", branch: "feat", isMain: false), .codex)
+        XCTAssertEqual(WorktreeOwner.infer(path: "/Users/a/app/.claude/worktrees/x", branch: "feat", isMain: false), .claude)
+        XCTAssertEqual(WorktreeOwner.infer(path: "/private/tmp/claude-501/p/s/scratchpad/wt", branch: nil, isMain: false), .claude)
+        XCTAssertEqual(WorktreeOwner.infer(path: "/Users/a/.t3/worktrees/app/x", branch: nil, isMain: false), .t3)
+        XCTAssertEqual(WorktreeOwner.infer(path: "/private/tmp/app-fix", branch: "codex/fix", isMain: false), .codex)
+        XCTAssertEqual(WorktreeOwner.infer(path: "/private/tmp/review", branch: nil, isMain: false), .other)
+        XCTAssertEqual(WorktreeOwner.infer(path: "/Users/a/.codex/worktrees/x/app", branch: "main", isMain: true), .main)
+    }
+
+    func testSessionGoesToMostSpecificWorktree() {
+        var nested = CodexSession(id: "nested", agent: .claude)
+        nested.projectPath = "/demo/app/.claude/worktrees/x/sub"
+        nested.phase = .running
+        nested.lastActivity = Date()
+        var root = CodexSession(id: "root")
+        root.projectPath = "/demo/app"
+        root.phase = .completed
+        let index = SessionIndex([nested, root], now: Date())
+        let assigned = index.assign(to: ["/demo/app", "/demo/app/.claude/worktrees/x", "/demo/app-other"])
+        XCTAssertEqual(assigned[0]?.map(\.identity), ["codex:root"])
+        XCTAssertEqual(assigned[1]?.map(\.identity), ["claude:nested"])
+        XCTAssertEqual(assigned[1]?.first?.active, true)
+        XCTAssertNil(assigned[2])
+    }
+
+    func testFinishedRequiresCleanMergedAndIdle() {
+        var worktree = AgentWorktree(entry: WorktreeEntry(path: "/demo/wt"), owner: .codex, isMain: false)
+        worktree.status = WorktreeStatus()
+        worktree.mergedIntoDefault = true
+        XCTAssertTrue(worktree.looksFinished)
+        worktree.activeSessions = 1
+        XCTAssertFalse(worktree.looksFinished)
+        worktree.activeSessions = 0
+        worktree.status?.untrackedFiles = 1
+        XCTAssertFalse(worktree.looksFinished)
+        worktree.status = WorktreeStatus()
+        worktree.mergedIntoDefault = false
+        XCTAssertFalse(worktree.looksFinished)
+        // A deleted upstream hides the ahead count: unmerged work is not "finished".
+        worktree.status?.upstreamGone = true
+        XCTAssertFalse(worktree.looksFinished)
+        worktree.mergedIntoDefault = true
+        XCTAssertTrue(worktree.looksFinished)
+    }
+
+    func testSuggestedRecoveryBranchIsAValidName() {
+        let item = UnreferencedHead(path: "/private/tmp/eg review 1267.gWiaJb", head: "b3e282c6aaaaaaaa")
+        XCTAssertEqual(item.suggestedBranch, "recovery/eg-review-1267-gWiaJb-b3e282c6")
+    }
+
+    // MARK: - Real git
+
+    private func git(_ arguments: String..., in directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", directory.path, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                             "-c", "commit.gpgsign=false"] + arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, arguments.joined(separator: " "))
+    }
+
+    func testScansRealRepositoryAndPrunesMissingFolders() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent("app")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try git("init", "-q", "-b", "main", in: repo)
+        try "a".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try git("add", ".", in: repo)
+        try git("commit", "-q", "-m", "init", in: repo)
+
+        let agentRoot = base.appendingPathComponent("home/.codex/worktrees")
+        let merged = agentRoot.appendingPathComponent("done/app")
+        let dirty = agentRoot.appendingPathComponent("work/app")
+        let removed = base.appendingPathComponent("gone")
+        try git("worktree", "add", "-q", "-b", "codex/done", merged.path, in: repo)
+        try git("worktree", "add", "-q", "-b", "codex/work", dirty.path, in: repo)
+        try git("worktree", "add", "-q", "-b", "feat/gone", removed.path, in: repo)
+        try "changed".write(to: dirty.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: removed)
+
+        var session = CodexSession(id: "s", agent: .codex)
+        session.projectPath = dirty.path
+        session.phase = .running
+        session.lastActivity = Date()
+
+        let scanner = WorktreeScanner()
+        let snapshot = await scanner.scan(sessions: [session], roots: [agentRoot])
+        XCTAssertNil(snapshot.issue)
+        XCTAssertEqual(snapshot.repositories.count, 1)
+        let repository = try XCTUnwrap(snapshot.repositories.first)
+        XCTAssertEqual(repository.defaultBranch, "main")
+        XCTAssertEqual(repository.linked.count, 3)
+        let byBranch = Dictionary(uniqueKeysWithValues: repository.linked.map { ($0.entry.branch ?? "", $0) })
+        XCTAssertEqual(byBranch["codex/done"]?.owner, .codex)
+        XCTAssertEqual(byBranch["codex/done"]?.mergedIntoDefault, true)
+        XCTAssertEqual(byBranch["codex/done"]?.looksFinished, true)
+        XCTAssertEqual(byBranch["codex/work"]?.status?.changedFiles, 1)
+        XCTAssertEqual(byBranch["codex/work"]?.activeSessions, 1)
+        XCTAssertEqual(byBranch["feat/gone"]?.entry.isPrunable, true)
+        XCTAssertNotNil(byBranch["codex/done"]?.lastActivity)
+
+        let plan = try await scanner.prunePlan(commonDir: repository.commonDir)
+        XCTAssertEqual(plan.records.count, 1)
+        // feat/gone still exists as a branch, so nothing needs saving.
+        XCTAssertEqual(plan.unreferenced, [])
+        let created = try await scanner.prune(commonDir: repository.commonDir, saving: plan.unreferenced)
+        XCTAssertEqual(created, [])
+        let after = await scanner.scan(sessions: [session], roots: [agentRoot])
+        XCTAssertEqual(after.repositories.first?.linked.count, 2)
+        XCTAssertEqual(after.prunableCount, 0)
+        // Prune never touches checkouts that still exist.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dirty.appendingPathComponent("a.txt").path))
+
+        let sizes = await scanner.diskUsage(paths: [merged.path])
+        XCTAssertGreaterThan(sizes[merged.path] ?? 0, 0)
+    }
+
+    private func output(_ arguments: String..., in directory: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", directory.path] + arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func makeRepository(at repo: URL) throws {
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try git("init", "-q", "-b", "main", in: repo)
+        try "a".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try git("add", ".", in: repo)
+        try git("commit", "-q", "-m", "init", in: repo)
+    }
+
+    func testPruneKeepsCommitsOnlyReferencedByMissingDetachedWorktree() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent("app")
+        try makeRepository(at: repo)
+        let review = base.appendingPathComponent("review 1")
+        try git("worktree", "add", "-q", "--detach", review.path, in: repo)
+        try "b".write(to: review.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+        try git("add", ".", in: review)
+        try git("commit", "-q", "-m", "only here", in: review)
+        let head = try output("rev-parse", "HEAD", in: review)
+        try FileManager.default.removeItem(at: review)
+
+        let scanner = WorktreeScanner()
+        let common = repo.appendingPathComponent(".git").path
+        let plan = try await scanner.prunePlan(commonDir: common)
+        XCTAssertEqual(plan.records.count, 1)
+        XCTAssertEqual(plan.unreferenced.map(\.head), [head])
+
+        // Pruning without saving is refused and leaves the record (and its reference) in place.
+        do {
+            _ = try await scanner.prune(commonDir: common, saving: [])
+            XCTFail("prune should refuse")
+        } catch let error as WorktreeScanner.PruneError {
+            XCTAssertEqual(error, .unreferencedCommits(1))
+        }
+        let stillListed = try await scanner.prunePlan(commonDir: common)
+        XCTAssertEqual(stillListed.records.count, 1)
+
+        // An existing branch with the suggested name is not overwritten.
+        try git("branch", plan.unreferenced[0].suggestedBranch, "main", in: repo)
+        let created = try await scanner.prune(commonDir: common, saving: plan.unreferenced)
+        XCTAssertEqual(created, [plan.unreferenced[0].suggestedBranch + "-2"])
+        XCTAssertEqual(try output("rev-parse", created[0], in: repo), head)
+        let after = try await scanner.prunePlan(commonDir: common)
+        XCTAssertEqual(after.records, [])
+    }
+
+    func testFolderInitializedLaterIsDiscovered() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let folder = base.appendingPathComponent("later")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let scanner = WorktreeScanner()
+        let start = Date()
+        let before = await scanner.scan(sessions: [], roots: [], extraSeeds: [folder.path], now: start)
+        XCTAssertEqual(before.repositories.count, 0)
+        try FileManager.default.removeItem(at: folder)
+        try makeRepository(at: folder)
+
+        let cached = await scanner.scan(sessions: [], roots: [], extraSeeds: [folder.path], now: start.addingTimeInterval(10))
+        XCTAssertEqual(cached.repositories.count, 0, "negative result is cached briefly")
+        let expired = await scanner.scan(sessions: [], roots: [], extraSeeds: [folder.path],
+                                         now: start.addingTimeInterval(WorktreeScanner.negativeDiscoveryLifetime + 1))
+        XCTAssertEqual(expired.repositories.count, 1)
+
+        let fresh = WorktreeScanner()
+        let other = base.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        _ = await fresh.scan(sessions: [], roots: [], extraSeeds: [other.path], now: start)
+        try FileManager.default.removeItem(at: other)
+        try makeRepository(at: other)
+        await fresh.forgetDiscovery()
+        let manual = await fresh.scan(sessions: [], roots: [], extraSeeds: [other.path], now: start.addingTimeInterval(1))
+        XCTAssertEqual(manual.repositories.count, 1, "manual refresh re-resolves at once")
+    }
+
+    func testFailedCheckRefusesPruneAndKeepsReference() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent("app")
+        try makeRepository(at: repo)
+        let review = base.appendingPathComponent("review")
+        try git("worktree", "add", "-q", "--detach", review.path, in: repo)
+        try "b".write(to: review.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+        try git("add", ".", in: review)
+        try git("commit", "-q", "-m", "only here", in: review)
+        let head = try output("rev-parse", "HEAD", in: review)
+        try FileManager.default.removeItem(at: review)
+
+        // A git wrapper whose `worktree list` fails while every other command works.
+        let wrapper = base.appendingPathComponent("git-failing-list")
+        try """
+        #!/bin/sh
+        if [ "$2" = "worktree" ] && [ "$3" = "list" ]; then exit 128; fi
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+
+        let common = repo.appendingPathComponent(".git").path
+        let failing = WorktreeScanner(git: GitRunner(executable: wrapper.path))
+        do {
+            _ = try await failing.prune(commonDir: common, saving: [])
+            XCTFail("prune must refuse when the check fails")
+        } catch let error as WorktreeScanner.PruneError {
+            XCTAssertEqual(error, .checkFailed)
+        }
+        do {
+            _ = try await failing.prunePlan(commonDir: common)
+            XCTFail("plan must report the failed check")
+        } catch let error as WorktreeScanner.PruneError {
+            XCTAssertEqual(error, .checkFailed)
+        }
+
+        // The record, and with it the only reference to the commit, is still there.
+        let plan = try await WorktreeScanner().prunePlan(commonDir: common)
+        XCTAssertEqual(plan.records.count, 1)
+        XCTAssertEqual(plan.unreferenced.map(\.head), [head])
+    }
+}

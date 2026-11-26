@@ -17,6 +17,8 @@ An **experimental VPN candidate** adds subscription import, server selection and
 - Explicit relative timestamps; completed turns keep their completion time. Recorded turn duration is shown in details when available.
 - Cumulative input, cached input and output token snapshots from Codex.
 - Last reported short and long usage windows, when present in the journals.
+- **Usage limits** card: Codex limits from its journals and Claude Code 5-hour/weekly limits through an optional status line bridge. Cursor does not store usage locally and is shown as unavailable.
+- **Agent worktrees** window: linked git worktrees of repositories agents work in, grouped by repository and by the agent that likely created them, with uncommitted/unpushed/merged state, active-session links, on-demand disk usage, Finder/Terminal/editor shortcuts and `git worktree prune` for records whose folders are gone.
 - Optional notifications when a turn observed as active finishes.
 - Custom Codex home directory, refresh controls and a separate dashboard window.
 - A demo mode using fictional data for screenshots and development.
@@ -86,6 +88,27 @@ Each agent can be turned off in Settings; a missing directory for an agent you d
 
 Both formats are internal and undocumented; they were checked against Claude Code and Cursor transcripts present in November 2026.
 
+## Worktrees
+
+Repositories are found from session project folders and from `~/.codex/worktrees`, `~/.claude/worktrees`, `~/.cursor/worktrees` and `~/.t3/worktrees` (two levels deep). For each repository the app runs `git worktree list --porcelain`, then `git status`, `git log -1` and `git merge-base --is-ancestor` per worktree, at most once a minute and with `GIT_OPTIONAL_LOCKS=0`, so it never writes an index an agent is using.
+
+| Owner | Evidence |
+| --- | --- |
+| Codex | Path under `.codex/worktrees/`, or branch `codex/…` |
+| Claude Code | Path under `.claude/worktrees/` or a Claude Code session scratchpad in `/tmp/claude-<uid>/`, or branch `claude/…` / `worktree-…` |
+| Cursor, T3 Code | Path under `.cursor/worktrees/` / `.t3/worktrees/` |
+| Other | Anything else, e.g. detached review checkouts in `/tmp` |
+
+"Looks finished" means: no uncommitted or untracked files, no active session, and HEAD is contained in the default branch. A deleted upstream alone is not enough — git then reports no ahead count, so such a worktree is shown as "upstream deleted · publish state unknown". Squash merges are not detected as merged.
+
+**The app does not delete worktrees or branches.** The only changing action is *Prune*, which first shows git's dry-run list and then removes git's records of worktrees whose folders no longer exist; locked worktrees are skipped and no files are removed. If a missing worktree's HEAD is the only reference to its commits (typically a detached review checkout), pruning would let a later `git gc` delete them, so the app first creates `recovery/<folder>-<sha>` branches for them and re-checks right before pruning; it refuses to prune if any such record remains. Folders found outside a repository are re-checked after 5 minutes or on manual refresh. Disk usage runs `du` only when requested.
+
+## Usage limits
+
+- **Codex:** the newest `rate_limits` report among recent journals.
+- **Claude Code:** it passes `rate_limits.five_hour` / `seven_day` only to its status line command. *Settings › Limits › Connect* sets `statusLine` in `~/.claude/settings.json` (backup: `settings.json.vibemonitoring-backup`; the file is rewritten with sorted keys) to a small shell script. The script saves its input to `~/Library/Application Support/VibeMonitoring/claude-statusline.json` (mode 0600, through a per-run temporary file and atomic rename, so parallel sessions do not collide) when it contains limits, then runs your previous status line command so its output is unchanged. That input also contains the session ID, working directory and model; only `rate_limits` is read. *Disconnect* restores the previous command and removes the files. Reports update when Claude Code refreshes its status line; API-key sessions have no plan limits.
+- **Cursor:** only the subscription type is stored locally. Live usage would need Cursor's sign-in token, which is not read.
+
 ## Tokens and costs
 
 Token events are **cumulative snapshots**. They are replaced, not summed on every event. Cached input is part of input; reasoning tokens are part of output and are not added a second time.
@@ -99,7 +122,8 @@ Dollar costs are intentionally not inferred from a model name or subscription pl
 - Agent monitoring runs locally. No requests are made until Quickping is explicitly connected; saved Quickping connections resume polling every 30 seconds on launch.
 - Quickping authorization and monitoring contact only the selected server. API redirects are rejected, browser cookies are not copied into API requests, and the read-only token is stored in macOS Keychain. Disconnect removes local access and attempts server revocation; if offline, the app explains how to revoke it on the website.
 - No telemetry, analytics or crash-upload SDK.
-- `auth.json`, API keys and subscription links are not read.
+- `auth.json`, API keys, Claude/Cursor sign-in tokens and subscription links are not read.
+- Agent folders are only written on explicit request: *Prune* (git worktree metadata) and the Claude status line bridge (`~/.claude/settings.json`).
 - Conversation text, command arguments and tool outputs are not displayed, persisted or uploaded. The JSONL files themselves contain these fields; the parser extracts only the metadata it needs.
 - Preferences store the selected Codex directory, notification toggle and non-secret Quickping server origin in macOS UserDefaults.
 - The VPN candidate stores the subscription in the user's Keychain. Before enabling a VPN configuration, the app resolves the selected server and sends its credentials to the system extension over XPC with signing requirements on both peers. The system extension writes credentials to the file-based System Keychain, accessible to its own signed code. VPN preferences contain a persistent Keychain reference, a non-secret node ID and validated server IP addresses; no subscription URLs or credential UUIDs are written there.
