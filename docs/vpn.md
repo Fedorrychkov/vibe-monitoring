@@ -1,6 +1,6 @@
 # Experimental built-in VPN
 
-**Status: experimental 0.3.11 candidate (build 16). Earlier builds connected on one Mac but had intermittent HTTPS stalls and a network-recovery failure requiring a reboot. The new recovery path and crash/leak behavior still need device checks.** A successful compile, signature or green unit test is not a protection guarantee.
+**Status: experimental 0.3.12 candidate (build 17). Earlier builds connected on one Mac but had intermittent HTTPS stalls and a network-recovery failure requiring a reboot. The new recovery path and crash/leak behavior still need device checks.** A successful compile, signature or green unit test is not a protection guarantee.
 
 A separate packet-filter system extension implements the experimental persistent network lock. Its contract, recovery steps and outstanding enforcement checks are in [network-lock.md](network-lock.md). Closing the app preserves protection intent. An explicitly permitted direct-access transition retires our VPN profile and disables our filter.
 

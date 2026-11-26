@@ -27,7 +27,7 @@ app=Path(sys.argv[1])
 base={
     'CFBundleIdentifier':'dev.vibemonitoring.app', 'CFBundleName':'VibeMonitoring',
     'CFBundleDisplayName':'VibeMonitoring', 'CFBundleExecutable':'VibeMonitoring', 'CFBundleIconFile':'AppIcon',
-    'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.3.11', 'CFBundleVersion':'16',
+    'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.3.12', 'CFBundleVersion':'17',
     'LSMinimumSystemVersion':'13.0','LSUIElement':True,'NSHighResolutionCapable':True,
     'NSPrincipalClass':'NSApplication','NSAppTransportSecurity':{'NSAllowsLocalNetworking':True},
     'NSSystemExtensionUsageDescription':'VibeMonitoring uses a separate VPN component to tunnel network traffic independently of the menu app.',
@@ -37,10 +37,10 @@ extension=app/'Contents/Library/SystemExtensions/dev.vibemonitoring.app.tunnel.s
 extension.write_bytes(plistlib.dumps({
     'CFBundleIdentifier':'dev.vibemonitoring.app.tunnel','CFBundleName':'VibeMonitoring Tunnel',
     'CFBundleExecutable':'VibeTunnel','CFBundlePackageType':'SYSX',
-    'CFBundleShortVersionString':'0.3.11','CFBundleVersion':'16','LSMinimumSystemVersion':'13.0',
+    'CFBundleShortVersionString':'0.3.12','CFBundleVersion':'17','LSMinimumSystemVersion':'13.0',
     'NSSystemExtensionUsageDescription':'VibeMonitoring tunnels network traffic through the VPN server you select.',
     'NetworkExtension':{
-        'NEMachServiceName':'$(TeamIdentifierPrefix)dev.vibemonitoring.app.tunnel.16',
+        'NEMachServiceName':'$(TeamIdentifierPrefix)dev.vibemonitoring.app.tunnel.17',
         'NEProviderClasses':{'com.apple.networkextension.packet-tunnel':'VibePacketTunnelProvider'},
     },
 }))
@@ -48,10 +48,10 @@ lock=app/'Contents/Library/SystemExtensions/dev.vibemonitoring.app.lock.systemex
 lock.write_bytes(plistlib.dumps({
     'CFBundleIdentifier':'dev.vibemonitoring.app.lock','CFBundleName':'VibeMonitoring Network Lock',
     'CFBundleExecutable':'VibeLock','CFBundlePackageType':'SYSX',
-    'CFBundleShortVersionString':'0.3.11','CFBundleVersion':'16','LSMinimumSystemVersion':'13.0',
+    'CFBundleShortVersionString':'0.3.12','CFBundleVersion':'17','LSMinimumSystemVersion':'13.0',
     'NSSystemExtensionUsageDescription':'VibeMonitoring blocks direct network traffic until you explicitly allow it.',
     'NetworkExtension':{
-        'NEMachServiceName':'$(TeamIdentifierPrefix)dev.vibemonitoring.app.lock.16',
+        'NEMachServiceName':'$(TeamIdentifierPrefix)dev.vibemonitoring.app.lock.17',
         'NEProviderClasses':{'com.apple.networkextension.filter-packet':'VibePacketLockProvider'},
     },
 }))
