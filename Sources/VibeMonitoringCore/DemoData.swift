@@ -58,4 +58,58 @@ public enum DemoData {
 
         return ScanSnapshot(sessions: [active, claude, finished, cursor, stale], updatedAt: now)
     }
+
+    public static func worktrees(at now: Date = Date()) -> WorktreeSnapshot {
+        func worktree(_ path: String, branch: String?, owner: WorktreeOwner, isMain: Bool = false,
+                      status: WorktreeStatus? = WorktreeStatus(), merged: Bool? = false, age: TimeInterval,
+                      prunable: Bool = false, active: Int = 0) -> AgentWorktree {
+            var entry = WorktreeEntry(path: path)
+            entry.branch = branch
+            entry.head = "0123456789abcdef"
+            entry.isPrunable = prunable
+            var value = AgentWorktree(entry: entry, owner: owner, isMain: isMain)
+            value.status = prunable ? nil : status
+            value.mergedIntoDefault = prunable ? nil : merged
+            value.lastCommitAt = now.addingTimeInterval(-age)
+            value.activeSessions = active
+            value.sessionIdentities = active > 0 ? ["demo"] : []
+            return value
+        }
+        var dirty = WorktreeStatus(); dirty.changedFiles = 4; dirty.untrackedFiles = 1; dirty.upstream = "origin/feat/invoices"
+        var ahead = WorktreeStatus(); ahead.ahead = 2; ahead.upstream = "origin/fix/retry"
+        var gone = WorktreeStatus(); gone.upstreamGone = true; gone.upstream = "origin/docs/readme"
+        let orbit = WorktreeRepository(commonDir: "/demo/projects/orbit-api/.git", mainPath: "/demo/projects/orbit-api",
+                                       defaultBranch: "origin/main", worktrees: [
+            worktree("/demo/projects/orbit-api", branch: "main", owner: .main, isMain: true, age: 600),
+            worktree("/demo/home/.codex/worktrees/invoices/orbit-api", branch: "feat/invoices", owner: .codex, status: dirty, age: 40, active: 1),
+            worktree("/demo/home/.codex/worktrees/retry/orbit-api", branch: "fix/retry", owner: .codex, status: ahead, age: 7_200),
+            worktree("/demo/home/.codex/worktrees/readme/orbit-api", branch: "docs/readme", owner: .codex, status: gone, age: 260_000),
+            worktree("/demo/tmp/orbit-review-42", branch: nil, owner: .other, age: 900_000, prunable: true),
+        ])
+        let billing = WorktreeRepository(commonDir: "/demo/projects/billing-core/.git", mainPath: "/demo/projects/billing-core",
+                                         defaultBranch: "origin/main", worktrees: [
+            worktree("/demo/projects/billing-core", branch: "main", owner: .main, isMain: true, age: 3_000),
+            worktree("/demo/projects/billing-core/.claude/worktrees/ledger", branch: "worktree-ledger", owner: .claude, merged: true, age: 90_000),
+            worktree("/demo/tmp/claude-501/billing/scratchpad/wt-export", branch: "feat/export", owner: .claude, age: 1_200_000, prunable: true),
+        ])
+        return WorktreeSnapshot(repositories: [orbit, billing], updatedAt: now)
+    }
+
+    public static func worktreeSizes() -> [String: Int64] {
+        ["/demo/home/.codex/worktrees/invoices/orbit-api": 412_000_000,
+         "/demo/home/.codex/worktrees/retry/orbit-api": 398_000_000,
+         "/demo/home/.codex/worktrees/readme/orbit-api": 401_000_000,
+         "/demo/projects/billing-core/.claude/worktrees/ledger": 96_000_000]
+    }
+
+    public static func limits(at now: Date = Date()) -> [AgentLimitReport] {
+        [AgentLimitReport(agent: .codex, windows: [
+            UsageWindow(usedPercent: 38, minutes: 300, resetsAt: now.addingTimeInterval(7_200)),
+            UsageWindow(usedPercent: 24, minutes: 10_080, resetsAt: now.addingTimeInterval(172_800)),
+         ], observedAt: now.addingTimeInterval(-8), plan: "pro"),
+         AgentLimitReport(agent: .claude, windows: [
+            UsageWindow(usedPercent: 72, minutes: 300, resetsAt: now.addingTimeInterval(3_600)),
+            UsageWindow(usedPercent: 41, minutes: 10_080, resetsAt: now.addingTimeInterval(400_000)),
+         ], observedAt: now.addingTimeInterval(-30))]
+    }
 }

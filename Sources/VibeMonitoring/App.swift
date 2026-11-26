@@ -47,6 +47,16 @@ struct VibeMonitoringApp: App {
                 exit(1)
             }
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--render-worktrees-demo"),
+           CommandLine.arguments.indices.contains(index + 1) {
+            do {
+                try DemoPreview.writeWorktrees(to: CommandLine.arguments[index + 1])
+                exit(0)
+            } catch {
+                fputs("Worktree demo preview could not be rendered.\n", stderr)
+                exit(1)
+            }
+        }
         let monitor = MonitorStore(demo: CommandLine.arguments.contains("--demo"))
         _store = StateObject(wrappedValue: monitor)
         _vpn = ObservedObject(wrappedValue: monitor.vpn)
@@ -67,8 +77,12 @@ struct VibeMonitoringApp: App {
             DashboardView(store: store)
         }.defaultSize(width: 520, height: 760)
 
+        Window("Agent worktrees", id: "worktrees") {
+            WorktreesView(store: store.worktrees, monitor: store)
+        }.defaultSize(width: 700, height: 760)
+
         Window("VibeMonitoring Settings", id: "preferences") {
-            PreferencesView(store: store)
+            PreferencesView(store: store, worktrees: store.worktrees)
         }.windowResizability(.contentSize)
     }
 }

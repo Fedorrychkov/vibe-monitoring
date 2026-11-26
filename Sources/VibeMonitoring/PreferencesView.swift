@@ -4,6 +4,7 @@ import VibeMonitoringCore
 
 struct PreferencesView: View {
     @ObservedObject var store: MonitorStore
+    @ObservedObject var worktrees: WorktreeStore
     @State private var path = ""
     @State private var choosingDirectory = false
 
@@ -16,8 +17,23 @@ struct PreferencesView: View {
                         get: { store.enabledAgents.contains(agent) }, set: { store.setAgent(agent, enabled: $0) }
                     ))
                 }
+                Toggle("Show agent git worktrees", isOn: $worktrees.enabled)
                 Text("Claude Code: ~/.claude/projects (or $CLAUDE_CONFIG_DIR). Cursor: ~/.cursor/projects/*/agent-transcripts. Cursor transcripts have no timestamps or token counts, so its status is inferred from file writes.")
                     .font(.caption).foregroundStyle(.secondary)
+                Text("Worktrees: repositories are found from session folders and ~/.codex, ~/.claude, ~/.cursor and ~/.t3 worktree folders. Git is run read-only once a minute; Prune is the only action that changes git metadata.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Limits") {
+                LabeledContent("Claude Code status line bridge") {
+                    if store.claudeBridgeInstalled {
+                        Button("Disconnect") { store.disconnectClaudeLimits() }
+                    } else {
+                        Button("Connect…") { store.connectClaudeLimits() }
+                    }
+                }
+                Text("Codex limits come from its journals. Claude Code passes 5-hour and weekly limits only to its status line, so the bridge saves that input locally and then runs your previous status line command. Disconnect restores it. Cursor usage is not available without its sign-in token, which VibeMonitoring does not read.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let issue = store.limitsIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
             }
             Section("Codex") {
                 TextField("Codex home", text: $path).onSubmit { store.applyHome(path) }

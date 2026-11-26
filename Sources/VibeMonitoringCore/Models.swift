@@ -38,14 +38,18 @@ public struct UsageWindow: Equatable, Sendable {
     public let usedPercent: Double
     public let minutes: Int?
     public let resetsAt: Date?
+    /// Overrides the duration-based title (e.g. "Spend limit").
+    public let label: String?
 
-    public init(usedPercent: Double, minutes: Int? = nil, resetsAt: Date? = nil) {
+    public init(usedPercent: Double, minutes: Int? = nil, resetsAt: Date? = nil, label: String? = nil) {
         self.usedPercent = usedPercent
         self.minutes = minutes
         self.resetsAt = resetsAt
+        self.label = label
     }
 
     public var title: String {
+        if let label { return label }
         guard let minutes else { return "Usage window" }
         if minutes == 10_080 { return "Weekly window" }
         if minutes % 60 == 0 { return "\(minutes / 60)h window" }

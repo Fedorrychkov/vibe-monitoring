@@ -63,7 +63,9 @@ struct DashboardView: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     VPNView(store: store.vpn, activeTurns: store.snapshot.activeCount())
+                    LimitsCard(store: store)
                     QuickpingView(store: store.quickping)
+                    WorktreeSummaryCard(store: store.worktrees)
                     HStack {
                         Label("Agents", systemImage: "terminal").font(.headline)
                         Spacer()
@@ -196,8 +198,8 @@ struct SessionCard: View {
                 if let duration = session.turnDuration {
                     LabeledContent("Turn duration", value: Duration.seconds(duration).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated)))
                 }
-                if let primary = session.primaryWindow { QuotaView(window: primary) }
-                if let secondary = session.secondaryWindow { QuotaView(window: secondary) }
+                if let primary = session.primaryWindow { QuotaView(window: primary, agent: session.agent) }
+                if let secondary = session.secondaryWindow { QuotaView(window: secondary, agent: session.agent) }
                 if let usage = session.usage {
                     Text("\(session.usageCaption): \(usage.total.formatted()) tokens. Cached input is part of input; reasoning is part of output. These counters are not a bill.")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
@@ -235,37 +237,12 @@ extension CodexSession {
     }
 }
 
-private struct QuotaView: View {
-    let window: UsageWindow
-    private var expired: Bool { window.resetsAt.map { $0 <= Date() } ?? false }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(window.title)
-                Spacer()
-                Text("\(window.usedPercent, specifier: "%.0f")% used")
-            }
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.secondary.opacity(0.10))
-                    Capsule().fill(expired ? Color.secondary : .indigo)
-                        .frame(width: geometry.size.width * min(100, max(0, window.usedPercent)) / 100)
-                }
-            }.frame(height: 4)
-            if expired {
-                Text("Report expired. Waiting for a new Codex quota event.").foregroundStyle(.secondary)
-            } else if let reset = window.resetsAt {
-                Text("Reported reset: \(reset.formatted(date: .abbreviated, time: .shortened))").foregroundStyle(.secondary)
-            }
-        }.font(.system(size: 10))
-    }
-}
-
 @MainActor
 enum DemoPreview {
     static func write(to path: String) throws {
         let snapshot = DemoData.snapshot()
+        let monitor = MonitorStore(demo: true, startPolling: false)
+        monitor.refreshClaudeLimits()
         let content = VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Image(systemName: "waveform.path.ecg").font(.title).foregroundStyle(.indigo)
@@ -282,6 +259,8 @@ enum DemoPreview {
                 MetricCard(value: "\(snapshot.sessions.count)", title: "Recent sessions", symbol: "square.stack.3d.up", color: .teal)
             }
             VPNView(store: VPNStore(demo: true), showsSettings: false)
+            LimitsCard(store: monitor)
+            WorktreeSummaryCard(store: monitor.worktrees)
             Label("Agents", systemImage: "terminal").font(.headline).padding(.top, 6)
             ForEach(snapshot.sessions, id: \.identity) { session in
                 SessionCard(session: session, initiallyExpanded: session.displayPhase() == .running)

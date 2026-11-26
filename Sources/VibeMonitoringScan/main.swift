@@ -6,7 +6,8 @@ struct ScanCommand {
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments.contains("--help") {
-            print("Usage: vibe-monitoring-scan [--home CODEX_HOME] [--claude-home DIR] [--cursor-home DIR] [--demo]")
+            print("Usage: vibe-monitoring-scan [--home CODEX_HOME] [--claude-home DIR] [--cursor-home DIR] [--worktrees] [--demo]")
+            print("--worktrees adds aggregate git worktree counts by owner (read-only).")
             print("Prints aggregate local status counts for Codex, Claude Code and Cursor. No prompts, paths, IDs or credentials are printed.")
             return
         }
@@ -38,6 +39,23 @@ struct ScanCommand {
                 "tokenSnapshots": sessions.filter { $0.usage != nil }.count,
             ]
         }
+        var worktrees: Any = NSNull()
+        if arguments.contains("--worktrees"), !arguments.contains("--demo") {
+            let started = Date()
+            let found = await WorktreeScanner().scan(sessions: snapshot.sessions)
+            let linked = found.linked
+            worktrees = [
+                "repositories": found.repositories.count,
+                "linked": linked.count,
+                "byOwner": Dictionary(grouping: linked, by: \.owner.rawValue).mapValues(\.count),
+                "dirty": found.dirtyCount,
+                "prunable": found.prunableCount,
+                "looksFinished": found.finishedCount,
+                "withActiveSession": linked.filter { $0.activeSessions > 0 }.count,
+                "unreadable": found.repositories.filter { $0.issue != nil }.count,
+                "scanSeconds": (Date().timeIntervalSince(started) * 10).rounded() / 10,
+            ] as [String: Any]
+        }
         let counts = Dictionary(grouping: snapshot.sessions, by: { $0.displayPhase().rawValue }).mapValues(\.count)
         let result: [String: Any] = [
             "sessions": snapshot.sessions.count,
@@ -48,6 +66,7 @@ struct ScanCommand {
             "quotaSnapshots": snapshot.sessions.filter { $0.limitsObservedAt != nil }.count,
             "issue": snapshot.issue as Any? ?? NSNull(),
             "demo": arguments.contains("--demo"),
+            "worktrees": worktrees,
         ]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]),
            let text = String(data: data, encoding: .utf8) { print(text) }
